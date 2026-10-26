@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block title %}Central Library — {{ server_name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+    <div>
+        <h3 class="fw-bold mb-1"><i class="fa-solid fa-film text-primary me-2"></i>Central Media Library</h3>
+        <p class="text-secondary mb-0">Browse and stream your merged, cleaned, and organized channels and media.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Left Category Sidebar -->
+    <div class="col-12 col-md-4 col-xl-3">
+        <div class="card shadow-sm border category-sidebar-card sticky-top" style="top: 80px;">
+            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fa-solid fa-layer-group text-primary"></i>
+                    <span class="fw-semibold text-dark fs-7">Categories</span>
+                </div>
+                <span class="badge bg-light text-secondary border rounded-pill fs-8">{{ groups|length }}</span>
+            </div>
+
+            <!-- Instant Category Filter Input -->
+            <div class="p-2 border-bottom bg-light">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-white"><i class="fa-solid fa-filter fs-8 text-muted"></i></span>
+                    <input type="text" class="form-control form-control-sm" 
+                           placeholder="Filter groups..." oninput="filterCategories(this.value)">
+                     <div class="input-group-append">
+                        <button class="btn-sm btn btn-outline-secondary" id="regexMode" onclick="this.classList.toggle('bg-primary')" type="button">.{ }</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category List -->
+            <div class="category-sidebar-list list-group list-group-flush" id="categorySidebarList">
+                <a href="/library?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}" 
+                   class="list-group-item list-group-item-action category-item border-0 d-flex justify-content-between align-items-center {% if not current_group %}active{% endif %}"
+                   data-category-name="All Categories">
+                    <span class="text-truncate">
+                        <i class="fa-solid fa-border-all me-2 opacity-75"></i> All Categories
+                    </span>
+                    <span class="badge {% if not current_group %}bg-primary text-white{% else %}bg-light text-secondary border{% endif %} rounded-pill fs-8">
+                        {{ total_count }}
+                    </span>
+                </a>
+
+                {% for g in groups %}
+                {% set src_ids = group_sources_map.get(g, []) %}
+                <a href="/library?tab={{ tab }}&group={{ g|urlencode }}{% if q %}&q={{ q }}{% endif %}" 
+                   class="list-group-item list-group-item-action category-item border-0 d-flex justify-content-between align-items-center {% if current_group == g %}active{% endif %}"
+                   data-category-name="{{ g }}"
+                   title="{{ g }}">
+                    <span class="text-truncate me-2">
+                        <i class="fa-regular fa-folder me-2 opacity-75"></i> {{ g }}
+                    </span>
+                    <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                        {% if src_ids|length == 1 %}
+                            {% set s = source_map.get(src_ids[0]) %}
+                            {% if s %}
+                            <span class="badge bg-light text-secondary border rounded-pill fs-9" title="Source: {{ s.name }}">{{ s.name }}</span>
+                            {% endif %}
+                        {% elif src_ids|length > 1 %}
+                            <span class="badge bg-primary-subtle text-primary border rounded-pill fs-9" title="{{ src_ids|length }} sources">{{ src_ids|length }} sources</span>
+                        {% endif %}
+                        {% if current_group == g %}
+                        <i class="fa-solid fa-chevron-right fs-9 text-primary ms-1"></i>
+                        {% endif %}
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Media Content -->
+    <div class="col-12 col-md-8 col-xl-9">
+        <!-- Tabs & Search Toolbar -->
+        <div class="card shadow-sm border mb-4">
+            <div class="card-body p-3">
+                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                    <!-- Nav Tabs -->
+                    <ul class="nav nav-pills">
+                        <li class="nav-item">
+                            <a class="nav-link {% if tab == 'live' %}active fw-bold{% else %}text-dark{% endif %}" href="/library?tab=live{% if current_group %}&group={{ current_group|urlencode }}{% endif %}">
+                                <i class="fa-solid fa-tv me-1"></i> Live TV
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if tab == 'vod' %}active fw-bold{% else %}text-dark{% endif %}" href="/library?tab=vod{% if current_group %}&group={{ current_group|urlencode }}{% endif %}">
+                                <i class="fa-solid fa-film me-1"></i> Movies
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if tab == 'series' %}active fw-bold{% else %}text-dark{% endif %}" href="/library?tab=series{% if current_group %}&group={{ current_group|urlencode }}{% endif %}">
+                                <i class="fa-solid fa-clapperboard me-1"></i> TV Series
+                            </a>
+                        </li>
+                    </ul>
+
+                    <!-- Search Form -->
+                    <form class="d-flex gap-2" method="GET" action="/library" id="mediaSearchForm">
+                        <input type="hidden" name="tab" value="{{ tab }}">
+                        {% if current_group %}
+                        <input type="hidden" name="group" value="{{ current_group }}">
+                        {% endif %}
+                        <div class="input-group input-group-sm" style="min-width: 250px;">
+                            <span class="input-group-text"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                            <input type="search" id="mediaSearchInput" name="q" class="form-control" 
+                                   placeholder="Search {{ tab }}..." value="{{ q }}" oninput="filterMediaCards(this.value)">
+                            <button class="btn btn-outline-secondary" type="submit">Search</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Filter Indicator -->
+        {% if current_group or q %}
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span class="text-secondary fs-7">Active Filters:</span>
+            {% if current_group %}
+            <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
+                <i class="fa-regular fa-folder"></i> {{ current_group }}
+                <a href="/library?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear category filter">&times;</a>
+            </span>
+            {% endif %}
+            {% if q %}
+            <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
+                <i class="fa-solid fa-magnifying-glass"></i> "{{ q }}"
+                <a href="/library?tab={{ tab }}{% if current_group %}&group={{ current_group|urlencode }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear search">&times;</a>
+            </span>
+            {% endif %}
+            <a href="/library?tab={{ tab }}" class="btn btn-link btn-sm text-secondary p-0 ms-2 fs-8 text-decoration-none">Reset all</a>
+        </div>
+        {% endif %}
+
+        <!-- Media Grid -->
+        <div id="noMediaMatchesAlert" class="card shadow-sm border p-4 text-center text-muted d-none mb-4">
+            <i class="fa-solid fa-magnifying-glass fs-3 mb-2 text-secondary"></i>
+            <h6>No matching media on this page</h6>
+            <p class="fs-7 text-secondary mb-0">Press Enter or click "Search" to search your entire catalog.</p>
+        </div>
+
+        {% if not items %}
+        <div class="card shadow-sm border p-5 text-center text-muted">
+            <i class="fa-solid fa-circle-notch fs-1 mb-3 text-secondary"></i>
+            <h5>No media found</h5>
+            <p class="fs-7 text-secondary">Try selecting another category from the left sidebar, clearing your search query, or refreshing your sources.</p>
+        </div>
+        {% else %}
+        <div class="row row-cols-2 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-5 g-3 mb-4" id="mediaCardsGrid">
+            {% for item in items %}
+            {% set src = source_map.get(item.source_id) %}
+            <div class="col media-card-col" data-media-title="{{ item.display_name|lower }}" data-media-raw="{{ item.raw_name|lower }}">
+                <div class="card h-100 media-card shadow-sm position-relative overflow-hidden" 
+                     title="Raw: {{ item.raw_name }} | Group: {{ item.raw_group }}">
+                    
+                    <!-- Source Badge Overlay -->
+                    {% if src %}
+                    <span class="position-absolute top-0 start-0 m-2 badge bg-dark bg-opacity-75 text-white rounded-pill fs-9 z-2">
+                        {{ src.name }}
+                    </span>
+                    {% endif %}
+
+                    <!-- Floating Action Button (Top Right) -->
+                    {% if tab == 'live' %}
+                        {% set play_url = "/live/" ~ output_username ~ "/" ~ output_password ~ "/" ~ item.id ~ ".m3u8" %}
+                        <button class="btn btn-primary rounded-circle shadow floating-action-btn position-absolute top-0 end-0 m-2 z-3" 
+                                onclick="playStream('{{ play_url }}', '{{ item.display_name|escape }}', 'live', {{ item.id }}, 'm3u8')"
+                                title="Play Live Stream">
+                            <i class="fa-solid fa-play fs-8"></i>
+                        </button>
+                    {% elif tab == 'vod' %}
+                        {% set play_url = "/movie/" ~ output_username ~ "/" ~ output_password ~ "/" ~ item.id ~ "." ~ (item.container_ext or 'mp4') %}
+                        <button class="btn btn-primary rounded-circle shadow floating-action-btn position-absolute top-0 end-0 m-2 z-3" 
+                                onclick="playStream('{{ play_url }}', '{{ item.display_name|escape }}', 'movie', {{ item.id }}, '{{ item.container_ext or 'mp4' }}')"
+                                title="Play Movie">
+                            <i class="fa-solid fa-play fs-8"></i>
+                        </button>
+                    {% else %}
+                        <!-- Series Card Floating Episodes Button -->
+                        <button class="btn btn-warning rounded-circle shadow floating-action-btn position-absolute top-0 end-0 m-2 z-3 text-dark" 
+                                onclick="openSeriesEpisodesModal({{ item.id }})"
+                                title="View Episodes">
+                            <i class="fa-solid fa-list-ol fs-8"></i>
+                        </button>
+                    {% endif %}
+
+                    <!-- Poster / Thumbnail Container -->
+                    <div class="media-thumb-wrapper d-flex align-items-center justify-content-center ratio ratio-1x1 position-relative cursor-pointer"
+                         {% if tab == 'series' %}onclick="openSeriesEpisodesModal({{ item.id }})"{% elif tab == 'live' %}onclick="playStream('{{ play_url }}', '{{ item.display_name|escape }}', 'live', {{ item.id }}, 'm3u8')"{% elif tab == 'vod' %}onclick="playStream('{{ play_url }}', '{{ item.display_name|escape }}', 'movie', {{ item.id }}, '{{ item.container_ext or 'mp4' }}')"{% endif %}>
+                        {% if tab == 'live' %}
+                            {% if item.logo_url %}
+                            <img src="{{ item.logo_url }}" class="img-fluid p-3 object-fit-contain" alt="{{ item.display_name }}" loading="lazy" onerror="this.src='/static/img/placeholder_channel.png'; this.onerror=null;">
+                            {% else %}
+                            <i class="fa-solid fa-tv fs-1 text-white opacity-25"></i>
+                            {% endif %}
+                        {% elif tab == 'vod' %}
+                            {% if item.poster_url %}
+                            <img src="{{ item.poster_url }}" class="img-fluid object-fit-cover w-100 h-100" alt="{{ item.display_name }}" loading="lazy" onerror="this.style.display='none'">
+                            {% else %}
+                            <i class="fa-solid fa-film fs-1 text-white opacity-25"></i>
+                            {% endif %}
+                        {% else %}
+                            {% if item.poster_url %}
+                            <img src="{{ item.poster_url }}" class="img-fluid object-fit-cover w-100 h-100" alt="{{ item.display_name }}" loading="lazy" onerror="this.style.display='none'">
+                            {% else %}
+                            <i class="fa-solid fa-clapperboard fs-1 text-white opacity-25"></i>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+
+                    <!-- Card Info -->
+                    <div class="card-body p-2 d-flex flex-column justify-content-between">
+                        <div>
+                            <h6 class="card-title fs-7 fw-semibold text-truncate mb-1 text-dark" title="{{ item.display_name }}">
+                                {{ item.display_name }}
+                            </h6>
+                            <small class="text-secondary fs-8 text-truncate d-block mb-1" title="{{ item.display_group }}">
+                                <i class="fa-regular fa-folder me-1"></i>{{ item.display_group or 'Uncategorized' }}
+                            </small>
+                        </div>
+
+                        {% if tab in ('vod', 'series') %}
+                        <div class="d-flex justify-content-between align-items-center fs-8 text-muted pt-1 border-top">
+                            <span>{{ item.year or '' }}</span>
+                            {% if item.rating %}
+                            <span class="text-warning-emphasis fw-bold"><i class="fa-solid fa-star me-1 text-warning fs-9"></i>{{ "%.1f"|format(item.rating) }}</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if total_pages > 1 %}
+        <nav class="d-flex justify-content-center">
+            <ul class="pagination pagination-sm">
+                <li class="nav-item page-item {% if page <= 1 %}disabled{% endif %}">
+                    <a class="page-link" href="/library?tab={{ tab }}{% if current_group %}&group={{ current_group|urlencode }}{% endif %}{% if q %}&q={{ q }}{% endif %}&page={{ page - 1 }}">Previous</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link text-secondary">Page {{ page }} of {{ total_pages }}</span>
+                </li>
+                <li class="nav-item page-item {% if page >= total_pages %}disabled{% endif %}">
+                    <a class="page-link" href="/library?tab={{ tab }}{% if current_group %}&group={{ current_group|urlencode }}{% endif %}{% if q %}&q={{ q }}{% endif %}&page={{ page + 1 }}">Next</a>
+                </li>
+            </ul>
+        </nav>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<!-- Series Episodes Collection Modal -->
+<div class="modal fade" id="seriesEpisodesModal" tabindex="-1" aria-labelledby="seriesEpisodesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow border">
+            <div class="modal-header border-bottom">
+                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="seriesEpisodesModalLabel">
+                    <i class="fa-solid fa-clapperboard text-warning"></i> <span id="seriesModalTitle">Series Episodes</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4" id="seriesEpisodesModalBody">
+                <div class="text-center py-5" id="seriesLoadingSpinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading episodes...</span>
+                    </div>
+                    <div class="text-muted mt-2 fs-7">Loading series episodes collection...</div>
+                </div>
+                
+                <div id="seriesModalContent" class="d-none">
+                    <!-- Series Overview Banner -->
+                    <div class="row g-3 mb-4 align-items-center">
+                        <div class="col-auto">
+                            <img id="seriesModalPoster" src="" class="rounded shadow-sm" style="width: 90px; height: 130px; object-fit: cover;" alt="Poster" onerror="this.src='/static/img/placeholder_channel.png'">
+                        </div>
+                        <div class="col">
+                            <h5 id="seriesModalName" class="fw-bold text-dark mb-1"></h5>
+                            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                <span class="badge bg-light text-dark border" id="seriesModalYear"></span>
+                                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" id="seriesModalRating"></span>
+                                <span class="badge bg-light text-secondary border" id="seriesModalGenre"></span>
+                            </div>
+                            <p class="fs-8 text-secondary mb-0" id="seriesModalPlot"></p>
+                        </div>
+                    </div>
+
+                    <!-- Season Pills Navigation -->
+                    <ul class="nav nav-pills mb-3" id="seriesSeasonsTabs"></ul>
+
+                    <!-- Episodes Container -->
+                    <div id="seriesEpisodesList" class="d-flex flex-column gap-2"></div>
+                </div>
+            </div>
+            <div class="modal-footer border-top">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

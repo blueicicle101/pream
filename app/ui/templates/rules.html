@@ -1,0 +1,576 @@
+{% extends "base.html" %}
+
+{% block title %}Rules Engine — {{ server_name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+    <div>
+        <h3 class="fw-bold mb-1"><i class="fa-solid fa-wand-magic-sparkles text-primary me-2"></i>Rules Engine</h3>
+        <p class="text-secondary mb-0">Define ordered transformation, renaming, and filtering rules applied across your
+            library.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#ruleSandboxModal">
+            <i class="fa-solid fa-flask-vial me-1"></i> Rule Sandbox
+        </button>
+        <button class="btn btn-warning text-dark fw-bold" onclick="triggerApplyRules(this)">
+            <i class="fa-solid fa-bolt me-1"></i> Apply Rules Now
+        </button>
+        <button class="btn btn-primary fw-semibold" data-bs-toggle="modal" data-bs-target="#addRuleModal">
+            <i class="fa-solid fa-plus me-1"></i> Add Rule
+        </button>
+    </div>
+</div>
+
+{% if db_locked %}
+<div class="card border-warning shadow-sm mb-4 bg-warning-subtle">
+    <div class="card-body p-4 d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+        <div class="d-flex align-items-center gap-3">
+            <div class="spinner-border text-warning flex-shrink-0" role="status" style="width: 2.2rem; height: 2.2rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div>
+                <h5 class="fw-bold mb-1 text-dark"><i class="fa-solid fa-database text-warning me-2"></i>Database Ingestion in Progress</h5>
+                <p class="text-secondary mb-0">A background source scan is currently writing new streams to the
+                    database. The rules view will automatically reload once the write completes (retrying in <span
+                        id="reloadCount" class="fw-bold text-dark">3</span>s).</p>
+            </div>
+        </div>
+        <div class="d-flex gap-2 flex-shrink-0">
+            <button class="btn btn-warning text-dark fw-bold px-3" onclick="window.location.reload()">
+                <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh Now
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+    (function () {
+        let t = 3;
+        const interval = setInterval(() => {
+            t--;
+            const el = document.getElementById("reloadCount");
+            if (el) el.textContent = t;
+            if (t <= 0) {
+                clearInterval(interval);
+                window.location.reload();
+            }
+        }, 1000);
+    })();
+</script>
+{% endif %}
+
+<!-- 1. Active Rule Pipeline Table (Collapsible Accordion) -->
+<div class="accordion mb-4" id="rulesPipelineAccordion">
+    <div class="accordion-item shadow-sm border rounded overflow-hidden">
+        <h2 class="accordion-header" id="headingPipeline">
+            <button class="accordion-button bg-white py-3 fw-bold fs-6 d-flex justify-content-between align-items-center" 
+                    type="button" 
+                    data-bs-toggle="collapse" 
+                    data-bs-target="#collapsePipeline" 
+                    aria-expanded="true" 
+                    aria-controls="collapsePipeline"
+                    id="pipelineAccordionBtn">
+                <div class="d-flex justify-content-between align-items-center w-100 pe-3">
+                    <span class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-list-ol text-primary"></i> Active Rule Pipeline (Executed in Order)
+                    </span>
+                    <span class="badge bg-light text-dark border">{{ rules|length }} rules configured</span>
+                </div>
+            </button>
+        </h2>
+        <div id="collapsePipeline" class="accordion-collapse collapse show" aria-labelledby="headingPipeline">
+            <div class="accordion-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th>Type</th>
+                                <th>Scope</th>
+                                <th>Match Pattern (Regex)</th>
+                                <th>Replacement / Target</th>
+                                <th>Affected Items</th>
+                                <th>State</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rulesTableBody">
+                            {% if not rules %}
+                            <tr>
+                                <td colspan="8" class="text-center py-5 text-muted">
+                                    <i class="fa-solid fa-wand-sparkles fs-2 mb-2 d-block"></i>
+                                    No rules created yet. Click <strong>Add Rule</strong> above to create your first
+                                    transformation.
+                                </td>
+                            </tr>
+                            {% else %}
+                            {% for r in rules %}
+                            <tr id="ruleRow-{{ r.id }}" data-rule-id="{{ r.id }}">
+                                <td>
+                                    <span class="badge bg-light text-dark border">{{ r.order }}</span>
+                                </td>
+                                <td>
+                                    {% if 'rename' in r.rule_type %}
+                                    <span class="badge bg-info-subtle text-info border border-info-subtle">{{ r.rule_type
+                                        }}</span>
+                                    {% elif 'hide' in r.rule_type %}
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle">{{ r.rule_type
+                                        }}</span>
+                                    {% elif 'upper' in r.rule_type or 'lower' in r.rule_type or 'capit' in r.rule_type or 'title' in r.rule_type %}
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">{{ r.rule_type
+                                        }}</span>
+                                    {% else %}
+                                    <span class="badge bg-warning-subtle text-warning border border-warning-subtle">{{
+                                        r.rule_type }}</span>
+                                    {% endif %}
+                                    {% if r.description %}
+                                    <div class="fs-8 text-secondary mt-1">{{ r.description }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary-subtle text-secondary text-uppercase fs-8">{{ r.content_type
+                                        }}</span>
+                                </td>
+                                <td class="regex-scroll">
+                                    <code
+                                        class="text-primary  fs-7 bg-light px-2 py-1 rounded border">{{ r.match_pattern }}</code>
+                                    <small class="text-muted d-block fs-8 mt-1">Field: <strong>{{ r.match_field
+                                            }}</strong></small>
+                                </td>
+                                <td>
+                                    {% if r.replacement is not none %}
+                                    <code
+                                        class="text-success fs-7 bg-light px-2 py-1 rounded border">{{ r.replacement or '""' }}</code>
+                                    {% elif r.new_group %}
+                                    <span class="badge bg-light text-dark border">{{ r.new_group }}</span>
+                                    {% else %}
+                                    <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-8">
+                                        <i class="fa-solid fa-check-double me-1"></i>{{ r.affected_count or 0 }} items
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if r.enabled %}
+                                    <span
+                                        class="badge bg-success-subtle text-success border border-success-subtle">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary-subtle text-secondary">Disabled</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-secondary" onclick="moveRuleUp({{ r.id }})"
+                                            title="Move Up"><i class="fa-solid fa-arrow-up"></i></button>
+                                        <button class="btn btn-outline-secondary" onclick="moveRuleDown({{ r.id }})"
+                                            title="Move Down"><i class="fa-solid fa-arrow-down"></i></button>
+                                        <button class="btn btn-outline-primary" onclick="openEditRuleModal({{ r.id }})"
+                                            title="Edit Rule"><i class="fa-solid fa-pen"></i></button>
+                                        <button class="btn btn-outline-danger" onclick="deleteRule({{ r.id }})"
+                                            title="Delete"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Revamped 2-Column Live Transformation Comparison -->
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+            <div>
+                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                    <i class="fa-solid fa-code-compare text-primary"></i> Live Transformation Preview (Original vs
+                    Filtered)
+                </h5>
+                <small class="text-secondary">Compare untouched raw source metadata against the resulting transformed
+                    display values.</small>
+            </div>
+
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <!-- Scope Dropdown -->
+                <select class="form-select form-select-sm" id="diffScopeSelect" style="width: 190px;"
+                    onchange="loadRulesDiff(this.value)">
+                    <optgroup label="Streams & Titles">
+                        <option value="channels" selected>Live TV Channels</option>
+                        <option value="movies">VOD Movies</option>
+                        <option value="series">TV Series</option>
+                    </optgroup>
+                    <optgroup label="Categories & Groups">
+                        <option value="channel_groups">Channel Groups</option>
+                        <option value="movie_groups">Movie Groups</option>
+                        <option value="series_groups">Series Groups</option>
+                        <option value="all_groups">All Groups Combined</option>
+                    </optgroup>
+                </select>
+
+                <!-- Search Input -->
+                <div class="input-group input-group-sm" style="width: 200px;">
+                    <span class="input-group-text"><i class="fa-solid fa-magnifying-glass fs-8"></i></span>
+                    <input type="text" class="form-control" placeholder="Search preview..."
+                        oninput="filterDiffTable(this.value)">
+                </div>
+
+                <!-- Only Changed Checkbox -->
+                <div class="form-check form-switch ms-2 mb-0">
+                    <input class="form-check-input" type="checkbox" id="onlyChangedSwitch"
+                        onchange="toggleOnlyChanged(this.checked)">
+                    <label class="form-check-label fs-8 fw-semibold" for="onlyChangedSwitch">Modified only</label>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+            <table class="table table-hover mb-0 align-middle" id="rulesDiffTable">
+                <thead>
+                    <tr>
+                        <th style="width: 50%;">
+                            <i class="fa-solid fa-file-import text-secondary me-1"></i> Original (Untouched from Source)
+                        </th>
+                        <th style="width: 50%;">
+                            <i class="fa-solid fa-wand-magic text-primary me-1"></i> Filtered (After Rules Applied)
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="rulesDiffTableBody">
+                    {% if not diff_items %}
+                    <tr>
+                        <td colspan="2" class="text-center py-5 text-muted">
+                            <i class="fa-solid fa-inbox fs-2 mb-2 d-block"></i>
+                            No items in library to preview yet. Refresh your sources first.
+                        </td>
+                    </tr>
+                    {% else %}
+                    {% for item in diff_items %}
+                    <tr class="diff-row {% if item.is_hidden %}row-hidden{% elif item.changed %}row-changed{% endif %}"
+                        data-changed="{{ 'true' if item.changed else 'false' }}">
+                        <td>
+                            <div class="fw-semibold text-dark">{{ item.raw_name }}</div>
+                            <small class="text-muted"><i class="fa-regular fa-folder me-1"></i>{{ item.raw_group
+                                }}</small>
+                        </td>
+                        <td>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <span class="fw-semibold text-dark">{{ item.display_name }}</span>
+                                    <small class="text-secondary d-block"><i class="fa-regular fa-folder me-1"></i>{{
+                                        item.display_group }}</small>
+                                </div>
+                                <div>
+                                    {% if item.is_hidden %}
+                                    <span class="badge bg-danger">Hidden</span>
+                                    {% elif item.is_renamed and item.is_group_changed %}
+                                    <span
+                                        class="badge bg-success-subtle text-success border border-success-subtle">Renamed
+                                        & Moved</span>
+                                    {% elif item.is_renamed %}
+                                    <span
+                                        class="badge bg-info-subtle text-info border border-info-subtle">Renamed</span>
+                                    {% elif item.is_group_changed %}
+                                    <span
+                                        class="badge bg-warning-subtle text-warning border border-warning-subtle">Group
+                                        Moved</span>
+                                    {% else %}
+                                    <span class="badge bg-light text-secondary border">Unchanged</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Rule Test Sandbox Modal -->
+<div class="modal fade" id="ruleSandboxModal" tabindex="-1" aria-labelledby="ruleSandboxModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="ruleSandboxModalLabel">
+                    <i class="fa-solid fa-flask-vial text-info me-2"></i>Rule Test Sandbox
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fs-7 text-secondary mb-3">
+                    Preview regex transformations on sample inputs without altering any saved data.
+                </p>
+
+                <div class="mb-2">
+                    <label class="form-label fs-7 fw-semibold">Sample Channel Name</label>
+                    <input type="text" class="form-control form-control-sm" id="testSampleName"
+                        value="[HD] Sky Sports Main Event FHD">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fs-7 fw-semibold">Sample Group Name</label>
+                    <input type="text" class="form-control form-control-sm" id="testSampleGroup"
+                        value="UK | Sports & Live Events">
+                </div>
+
+                <hr>
+
+                <div class="mb-2">
+                    <label class="form-label fs-7 fw-semibold">Test Rule Type</label>
+                    <select class="form-select form-select-sm" id="testRuleType">
+                        <optgroup label="Standard Actions">
+                            <option value="rename_group">Rename Group / Category</option>
+                            <option value="hide_group">Hide Group / Category</option>
+                            <option value="set_group">Set / Move to Group</option>
+                            <option value="rename_channel" selected>Rename Channel / Item Title</option>
+                            <option value="hide_channel">Hide Single Channel / Item</option>
+                        </optgroup>
+                        <optgroup label="Case Transformations">
+                            <option value="uppercase_channel">Uppercase Title</option>
+                            <option value="lowercase_channel">Lowercase Title</option>
+                            <option value="capitalize_channel">Capitalize Title</option>
+                            <option value="titlecase_channel">Title Case Title</option>
+                            <option value="uppercase_group">Uppercase Group</option>
+                            <option value="lowercase_group">Lowercase Group</option>
+                            <option value="capitalize_group">Capitalize Group</option>
+                            <option value="titlecase_group">Title Case Group</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label fs-7 fw-semibold">Regex Match Pattern</label>
+                    <input type="text" class="form-control form-control-sm font-monospace text-primary" id="testPattern"
+                        value="^\[HD\]\s*|\s*FHD$">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fs-7 fw-semibold">Replacement / New Group</label>
+                    <input type="text" class="form-control form-control-sm font-monospace text-success"
+                        id="testReplacement" value="">
+                </div>
+
+                <button class="btn btn-sm btn-primary fw-bold w-100 mb-3" onclick="runRuleTest()">
+                    <i class="fa-solid fa-play me-1"></i> Run Test Preview
+                </button>
+
+                <!-- Sandbox Output -->
+                <div class="p-3 bg-light rounded border" id="testOutputBox">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fs-8 text-secondary text-uppercase fw-bold">Test Result</span>
+                        <span class="badge bg-secondary" id="testMatchedBadge">Not run yet</span>
+                    </div>
+                    <div class="fs-7 mb-1">
+                        <span class="text-secondary">Output Name:</span>
+                        <strong class="text-dark font-monospace" id="testOutName">—</strong>
+                    </div>
+                    <div class="fs-7 mb-1">
+                        <span class="text-secondary">Output Group:</span>
+                        <strong class="text-dark font-monospace" id="testOutGroup">—</strong>
+                    </div>
+                    <div class="fs-7">
+                        <span class="text-secondary">Hidden:</span>
+                        <span class="font-monospace text-danger" id="testOutHidden">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal fade" id="addRuleModal" tabindex="-1" aria-labelledby="addRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="addRuleModalLabel"><i
+                        class="fa-solid fa-plus text-primary me-2"></i>Create Transformation Rule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="addRuleForm" onsubmit="submitAddRule(event)">
+                <div class="modal-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">Rule Type</label>
+                            <select class="form-select" id="ruleType"
+                                onchange="toggleRuleInputs('ruleType', 'ruleReplacementGroup', 'ruleNewGroupContainer')">
+                                <optgroup label="Standard Actions">
+                                    <option value="rename_group">Rename Group / Category</option>
+                                    <option value="hide_group">Hide Entire Group / Category</option>
+                                    <option value="set_group">Set / Move to Group</option>
+                                    <option value="rename_channel" selected>Rename Channel / Item Title</option>
+                                    <option value="hide_channel">Hide Single Channel / Item</option>
+                                </optgroup>
+                                <optgroup label="Case Transformations">
+                                    <option value="uppercase_channel">Uppercase Title</option>
+                                    <option value="lowercase_channel">Lowercase Title</option>
+                                    <option value="capitalize_channel">Capitalize Title</option>
+                                    <option value="titlecase_channel">Title Case Title</option>
+                                    <option value="uppercase_group">Uppercase Group</option>
+                                    <option value="lowercase_group">Lowercase Group</option>
+                                    <option value="capitalize_group">Capitalize Group</option>
+                                    <option value="titlecase_group">Title Case Group</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">Content Scope</label>
+                            <select class="form-select" id="ruleContentType">
+                                <option value="all" selected>All Content (Live, Movies, Series)</option>
+                                <option value="live">Live TV Only</option>
+                                <option value="vod">VOD Movies Only</option>
+                                <option value="series">TV Series Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Match Field</label>
+                        <select class="form-select" id="ruleMatchField">
+                            <option value="name">Channel / Media Name</option>
+                            <option value="group">Category / Group Name</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Regex Match Pattern</label>
+                        <input type="text" class="form-control font-monospace text-primary" id="ruleMatchPattern"
+                            required placeholder="e.g. ^\[HD\]\s*">
+                        <div class="form-text text-muted">Standard Python regex pattern. Case-insensitive by default.
+                        </div>
+                    </div>
+
+                    <div class="mb-3" id="ruleReplacementGroup">
+                        <label class="form-label fw-semibold">Replacement String</label>
+                        <input type="text" class="form-control font-monospace text-success" id="ruleReplacement"
+                            placeholder="Leave empty to remove matched text">
+                        <div class="form-text text-muted">Supports backreferences like \1, \g<1>.</div>
+                    </div>
+
+                    <div class="mb-3 d-none" id="ruleNewGroupContainer">
+                        <label class="form-label fw-semibold">Target Group Name</label>
+                        <input type="text" class="form-control" id="ruleNewGroup" placeholder="e.g. Sports | Football">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Description / Label (Optional)</label>
+                        <input type="text" class="form-control" id="ruleDescription"
+                            placeholder="e.g. Strip [HD] prefixes">
+                    </div>
+
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="ruleEnabled" checked>
+                        <label class="form-check-label fw-semibold" for="ruleEnabled">Enabled</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary fw-semibold">Save Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Rule Modal -->
+<div class="modal fade" id="editRuleModal" tabindex="-1" aria-labelledby="editRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="editRuleModalLabel"><i
+                        class="fa-solid fa-pen text-primary me-2"></i>Edit Transformation Rule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="editRuleForm" onsubmit="submitEditRule(event)">
+                <input type="hidden" id="editRuleId">
+                <div class="modal-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">Rule Type</label>
+                            <select class="form-select" id="editRuleType"
+                                onchange="toggleRuleInputs('editRuleType', 'editRuleReplacementGroup', 'editRuleNewGroupContainer')">
+                                <optgroup label="Standard Actions">
+                                    <option value="rename_group">Rename Group / Category</option>
+                                    <option value="hide_group">Hide Entire Group / Category</option>
+                                    <option value="set_group">Set / Move to Group</option>
+                                    <option value="rename_channel">Rename Channel / Item Title</option>
+                                    <option value="hide_channel">Hide Single Channel / Item</option>
+                                </optgroup>
+                                <optgroup label="Case Transformations">
+                                    <option value="uppercase_channel">Uppercase Title</option>
+                                    <option value="lowercase_channel">Lowercase Title</option>
+                                    <option value="capitalize_channel">Capitalize Title</option>
+                                    <option value="titlecase_channel">Title Case Title</option>
+                                    <option value="uppercase_group">Uppercase Group</option>
+                                    <option value="lowercase_group">Lowercase Group</option>
+                                    <option value="capitalize_group">Capitalize Group</option>
+                                    <option value="titlecase_group">Title Case Group</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">Content Scope</label>
+                            <select class="form-select" id="editRuleContentType">
+                                <option value="all">All Content (Live, Movies, Series)</option>
+                                <option value="live">Live TV Only</option>
+                                <option value="vod">VOD Movies Only</option>
+                                <option value="series">TV Series Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Match Field</label>
+                        <select class="form-select" id="editRuleMatchField">
+                            <option value="name">Channel / Media Name</option>
+                            <option value="group">Category / Group Name</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Regex Match Pattern</label>
+                        <input type="text" class="form-control font-monospace text-primary" id="editRuleMatchPattern"
+                            required>
+                    </div>
+
+                    <div class="mb-3" id="editRuleReplacementGroup">
+                        <label class="form-label fw-semibold">Replacement String</label>
+                        <input type="text" class="form-control font-monospace text-success" id="editRuleReplacement">
+                    </div>
+
+                    <div class="mb-3 d-none" id="editRuleNewGroupContainer">
+                        <label class="form-label fw-semibold">Target Group Name</label>
+                        <input type="text" class="form-control" id="editRuleNewGroup">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Description / Label (Optional)</label>
+                        <input type="text" class="form-control" id="editRuleDescription">
+                    </div>
+
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="editRuleEnabled">
+                        <label class="form-check-label fw-semibold" for="editRuleEnabled">Enabled</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary fw-semibold">Update Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

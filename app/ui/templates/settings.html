@@ -1,0 +1,463 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — {{ server_name }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h3 class="fw-bold mb-1"><i class="fa-solid fa-sliders text-primary me-2"></i>System Settings</h3>
+    <p class="text-secondary mb-0">Configure appearance, stream health monitoring, library organization, and scheduled
+        cron.</p>
+</div>
+
+{% if request.query_params.get('saved') %}
+<div class="alert alert-success alert-dismissible fade show border shadow-sm" role="alert">
+    <i class="fa-solid fa-check-circle me-2"></i> Settings saved successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- System Actions Section -->
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-bolt text-warning"></i> Actions
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <div class="p-3 bg-light rounded border h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fa-solid fa-arrows-rotate text-primary"></i> Refresh Sources
+                        </h6>
+                        <p class="text-secondary fs-7 mb-3">
+                            Trigger an immediate background refresh of all configured and enabled IPTV sources, applying active transformation rules upon completion.
+                        </p>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" id="btnRefreshAllSettings" onclick="triggerRefreshAll(this)">
+                            <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh All Sources
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6">
+                <div class="p-3 bg-light rounded border h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fa-solid fa-heart-pulse text-danger"></i> Stream Health Check
+                        </h6>
+                        <p class="text-secondary fs-7 mb-3">
+                            Test <code>{{ stream_health_count }}</code> random streams across all sources to verify playback validity, calculate latency and success rate, re-prioritize sources, and send a Telegram report.
+                        </p>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-outline-danger btn-sm fw-semibold" id="btnStreamHealth" onclick="runStreamHealthCheck(this)">
+                            <i class="fa-solid fa-stethoscope me-1"></i> Run Stream Health Check
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form method="POST" action="/settings">
+    <div class="row g-4">
+        <!-- Left: Gateway & Grouping Options -->
+        <div class="col-12 col-lg-6">
+            <!-- Theme & Appearance -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-circle-half-stroke text-primary"></i> Theme & Appearance
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="darkModeToggle" onchange="toggleDarkMode(this.checked)">
+                        <label class="form-check-label fw-semibold text-dark" for="darkModeToggle">Dark Mode</label>
+                        <div class="form-text text-muted">
+                            Toggle between Light Mode and Dark Mode. Your preference is saved locally across sessions.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stream Health Configuration -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-heart-pulse text-danger"></i> Stream Health Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="stream_health" id="streamHealth" {% if stream_health %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="streamHealth">Enable Stream Health Testing</label>
+                        <div class="form-text text-muted">
+                            Allow automated/on-demand testing of random streams to check validity and re-prioritize sources.
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label fw-semibold text-dark fs-7">Sample Streams Count per Source (X, Max: 5)</label>
+                        <input type="number" class="form-control form-control-sm font-monospace text-primary" style="max-width: 140px;" name="stream_health_count" id="streamHealthCountInput" min="1" max="5" value="{{ stream_health_count }}">
+                        <div class="form-text text-muted">
+                            Configured via <code>STREAM_HEALTH_COUNT</code> in <code>.env</code> (default: 4, maximum allowed: 5). Tests mixed random Live TV, Movies, and Series without downloading files.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            
+            <!-- Stream Failover & History -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-arrows-split-up-and-left text-primary"></i> Stream Failover & History
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="stream_failover" id="streamFailover" {% if stream_failover %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="streamFailover">Zero-Bandwidth Stream Failover</label>
+                        <div class="form-text text-muted">
+                            Transparently redirect IPTV clients (HTTP 302) to an alternate healthy provider if the primary stream fails or source is down. No server bandwidth consumed.
+                        </div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="stream_history" id="streamHistory" {% if stream_history %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="streamHistory">Log Playback History (30-Day Auto-Retention)</label>
+                        <div class="form-text text-muted">
+                            Record stream access logs (calling IP, media title, stream ID, timestamp) with automatic clearing of records older than 30 days.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Library Organization -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-layer-group text-primary"></i> Library Organization
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="group_by_source" id="groupBySource" {% if group_by_source %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="groupBySource">Group by Source (Global Prefix)</label>
+                        <div class="form-text text-muted">
+                            When enabled, every category is automatically prefixed with the source name (e.g.
+                            <code>[IPTV] UK News</code>). When disabled, channels from all sources share unified
+                            categories.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Output Xtream Info (Read Only) -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-key text-warning"></i> Xtream Output Gateway Credentials
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Configured in <code>.env</code>. IPTV clients (TiviMate, Smarters) authenticate with these
+                        credentials:
+                    </p>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fs-8 text-uppercase text-secondary fw-semibold">Output Username</label>
+                            <input type="text" class="form-control form-control-sm font-monospace text-dark" readonly
+                                value="{{ output_username }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fs-8 text-uppercase text-secondary fw-semibold">Output Password</label>
+                            <input type="text" class="form-control form-control-sm font-monospace text-dark" readonly
+                                value="{{ output_password }}">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label fs-8 text-uppercase text-secondary fw-semibold">Gateway Host & Port</label>
+                        <input type="text" class="form-control form-control-sm font-monospace text-muted" readonly
+                            value="{{ host }}:{{ port }}">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scheduler Settings -->
+            <div class="card shadow-sm border">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-clock text-primary"></i> Automated Refresh Schedule
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">Refresh Cron Expression</label>
+                        <input type="text" class="form-control font-monospace text-primary" name="refresh_cron"
+                            value="{{ refresh_cron }}">
+                        <div class="form-text text-muted">
+                            Standard 5-field cron. <code>0 4 * * *</code> = 4:00 AM daily.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Integrations (TMDB & Telegram) -->
+        <div class="col-12 col-lg-6">
+            <!-- TMDB Integration -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-film text-success"></i> TMDB API Integration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Used to fetch movie posters, backdrops, plot summaries, genres, and ratings.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">TMDB API Key (v3 auth)</label>
+                        <input type="password" class="form-control" name="tmdb_api_key" value="{{ tmdb_api_key }}"
+                            placeholder="Enter TMDB API Key">
+                        <div class="form-text text-muted">Get a free key from <a
+                                href="https://www.themoviedb.org/settings/api" target="_blank"
+                                class="text-primary">themoviedb.org</a>.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Telegram Notifications -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-brands fa-telegram text-primary"></i> Telegram Notifications
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Sends a summary report after every complete refresh, plus instant failure alerts if a source
+                        fails.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">Bot Token</label>
+                        <input type="text" class="form-control font-monospace" name="telegram_bot_token"
+                            value="{{ telegram_bot_token }}" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">Chat ID</label>
+                        <input type="text" class="form-control font-monospace" name="telegram_chat_id"
+                            value="{{ telegram_chat_id }}" placeholder="-100123456789 or @channel">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="sendTestTelegram()">
+                        <i class="fa-solid fa-paper-plane me-1"></i> Send Test Notification
+                    </button>
+                </div>
+            </div>
+
+            <!-- Settings Backup & Restore -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-box-archive text-info"></i> Backup & Restore
+                    </h5>
+                    <span class="badge bg-light text-secondary border fs-8">Encrypted JSON</span>
+                </div>
+                <div class="card-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Export your full configuration (system settings, configured sources, and rules pipeline) into a secure encrypted JSON file, or restore a previous backup.
+                    </p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary fw-semibold" onclick="openExportModal()">
+                            <i class="fa-solid fa-download me-1"></i> Export Backup
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary fw-semibold" onclick="openImportModal()">
+                            <i class="fa-solid fa-upload me-1"></i> Import Backup
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            <!-- Save Button Card -->
+            <div class="card shadow-sm border">
+                <div class="card-body d-flex justify-content-end gap-2">
+                    <a href="/" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary fw-bold px-4">
+                        <i class="fa-solid fa-floppy-disk me-1"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Stream Health Results Modal -->
+<div class="modal fade" id="streamHealthResultsModal" tabindex="-1" aria-labelledby="streamHealthResultsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="streamHealthResultsModalLabel">
+                    <i class="fa-solid fa-stethoscope text-primary me-2"></i>Stream Health & Prioritization Results
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="streamHealthResultsContent">
+                <!-- Dynamically populated by renderStreamHealthModal -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Export Backup Modal -->
+<div class="modal fade" id="exportBackupModal" tabindex="-1" aria-labelledby="exportBackupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="exportBackupModalLabel">
+                    <i class="fa-solid fa-download text-primary me-2"></i>Export Encrypted Backup
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fs-7 text-secondary mb-3">
+                    Your backup will be encrypted using <strong>PBKDF2-HMAC-SHA256</strong> with 100,000 iterations and authenticated with a digital MAC tag.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Encryption Passphrase (Optional)</label>
+                    <input type="password" class="form-control" id="backupExportPassword" placeholder="Defaults to your Admin Password">
+                    <div class="form-text text-muted">Leave blank to use your current admin password.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnRunExport" onclick="runExportBackup()">
+                    <i class="fa-solid fa-file-arrow-down me-1"></i> Download Backup File
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Backup Modal -->
+<div class="modal fade" id="importBackupModal" tabindex="-1" aria-labelledby="importBackupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="importBackupModalLabel">
+                    <i class="fa-solid fa-upload text-info me-2"></i>Import Settings Backup
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="importBackupForm" onsubmit="submitImportBackup(event)">
+                <div class="modal-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Restore settings, sources, and transformation rules from an encrypted JSON backup file.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Select Backup File (.json)</label>
+                        <input type="file" class="form-control" id="backupImportFile" accept=".json" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Decryption Passphrase</label>
+                        <input type="password" class="form-control" id="backupImportPassword" placeholder="Passphrase used during export (or admin password)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Restore Mode</label>
+                        <select class="form-select form-select-sm" id="backupImportMode">
+                            <option value="merge" selected>Merge / Update (Keep other sources & rules)</option>
+                            <option value="replace">Replace (Wipe existing sources/rules and overwrite)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold" id="btnRunImport">
+                        <i class="fa-solid fa-rotate me-1"></i> Restore Backup
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<!-- Export Backup Modal -->
+<div class="modal fade" id="exportBackupModal" tabindex="-1" aria-labelledby="exportBackupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="exportBackupModalLabel">
+                    <i class="fa-solid fa-download text-primary me-2"></i>Export Encrypted Backup
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fs-7 text-secondary mb-3">
+                    Your backup will be encrypted using <strong>PBKDF2-HMAC-SHA256</strong> with 100,000 iterations and authenticated with a digital MAC tag.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Encryption Passphrase (Optional)</label>
+                    <input type="password" class="form-control" id="backupExportPassword" placeholder="Defaults to your Admin Password">
+                    <div class="form-text text-muted">Leave blank to use your current admin password.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm fw-bold" id="btnRunExport" onclick="runExportBackup()">
+                    <i class="fa-solid fa-file-arrow-down me-1"></i> Download Backup File
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Import Backup Modal -->
+<div class="modal fade" id="importBackupModal" tabindex="-1" aria-labelledby="importBackupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="importBackupModalLabel">
+                    <i class="fa-solid fa-upload text-info me-2"></i>Import Settings Backup
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="importBackupForm" onsubmit="submitImportBackup(event)">
+                <div class="modal-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Restore settings, sources, and transformation rules from an encrypted JSON backup file.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Select Backup File (.json)</label>
+                        <input type="file" class="form-control" id="backupImportFile" accept=".json" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Decryption Passphrase</label>
+                        <input type="password" class="form-control" id="backupImportPassword" placeholder="Passphrase used during export (or admin password)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Restore Mode</label>
+                        <select class="form-select form-select-sm" id="backupImportMode">
+                            <option value="merge" selected>Merge / Update (Keep other sources & rules)</option>
+                            <option value="replace">Replace (Wipe existing sources/rules and overwrite)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold" id="btnRunImport">
+                        <i class="fa-solid fa-rotate me-1"></i> Restore Backup
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

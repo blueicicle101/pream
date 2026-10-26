@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — {{ server_name }}{% endblock %}
+
+{% block content %}
+<!-- Top Stats Row (5 Columns) -->
+<div class="row g-3 mb-4">
+    <!-- Stat: Live TV -->
+    <div class="col-12 col-sm-6 col-lg-4 col-xl">
+        <div class="card stat-card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center justify-content-between p-4">
+                <div>
+                    <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">Live Channels</h6>
+                    <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(channel_count) }}</h2>
+                    <div class="fs-8 text-secondary mt-1">
+                        out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_channels) }}</span> total streams
+                    </div>
+                </div>
+                <div class="stat-icon-wrapper rounded-circle bg-primary-subtle text-primary p-3">
+                    <i class="fa-solid fa-tv fs-4"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat: Movies -->
+    <div class="col-12 col-sm-6 col-lg-4 col-xl">
+        <div class="card stat-card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center justify-content-between p-4">
+                <div>
+                    <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">VOD Movies</h6>
+                    <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(movie_count) }}</h2>
+                    <div class="fs-8 text-secondary mt-1">
+                        out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_movies) }}</span> total streams
+                    </div>
+                </div>
+                <div class="stat-icon-wrapper rounded-circle bg-success-subtle text-success p-3">
+                    <i class="fa-solid fa-film fs-4"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat: Series -->
+    <div class="col-12 col-sm-6 col-lg-4 col-xl">
+        <div class="card stat-card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center justify-content-between p-4">
+                <div>
+                    <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">TV Series</h6>
+                    <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(series_count) }}</h2>
+                    <div class="fs-8 text-secondary mt-1">
+                        out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_series) }}</span> total streams
+                    </div>
+                </div>
+                <div class="stat-icon-wrapper rounded-circle bg-warning-subtle text-warning p-3">
+                    <i class="fa-solid fa-clapperboard fs-4"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat: Potential Failovers -->
+    <div class="col-12 col-sm-6 col-lg-4 col-xl">
+        <div class="card stat-card shadow-sm h-100 border-start border-4 border-info">
+            <div class="card-body d-flex align-items-center justify-content-between p-4">
+                <div>
+                    <div class="d-flex align-items-center gap-1 mb-1">
+                        <h6 class="text-uppercase text-muted fs-8 fw-bold mb-0">Potential Failovers</h6>
+                    </div>
+                    <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(potential_failovers_count) }}</h2>
+                    <div class="fs-8 text-secondary mt-1" title="Streams with matching display names across multiple active sources">
+                        <span class="badge bg-info-subtle text-info border border-info-subtle fs-9 me-1"><i class="fa-solid fa-shield-halved me-1"></i>302 Failover</span>
+                        redundant streams
+                    </div>
+                </div>
+                <div class="stat-icon-wrapper rounded-circle bg-info-subtle text-info p-3">
+                    <i class="fa-solid fa-arrows-split-up-and-left fs-4"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stat: Configured Sources -->
+    <div class="col-12 col-sm-6 col-lg-4 col-xl">
+        <div class="card stat-card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center justify-content-between p-4">
+                <div>
+                    <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">Configured Sources</h6>
+                    <h2 class="display-6 fw-bold mb-0 text-dark">{{ sources|length }}</h2>
+                    <div class="fs-8 text-secondary mt-1">
+                        <span class="fw-semibold text-dark">{{ "{:,}".format(total_all_streams) }}</span> total all streams
+                    </div>
+                </div>
+                <div class="stat-icon-wrapper rounded-circle bg-secondary-subtle text-secondary p-3">
+                    <i class="fa-solid fa-server fs-4"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Section: Sources Overview & Quick Actions -->
+<div class="row g-4 mb-4">
+    <div class="col-12 col-lg-8">
+        <!-- Sources Overview Card -->
+        <div class="card shadow-sm border">
+            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3">
+                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                    <i class="fa-solid fa-server text-primary"></i> Sources Overview
+                </h5>
+                <a href="/sources" class="btn btn-sm btn-outline-primary">Manage Sources</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light fs-8 text-uppercase">
+                            <tr>
+                                <th style="width: 5%;">Pri</th>
+                                <th>Source Name</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th class="text-center">Active Streams</th>
+                                <th>Last Refresh</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if not sources %}
+                            <tr>
+                                <td colspan="7" class="text-center py-5 text-muted">
+                                    <i class="fa-solid fa-folder-open fs-2 mb-2 d-block"></i>
+                                    No sources added yet. <a href="/sources" class="text-primary fw-semibold">Add your first IPTV source</a> to get started.
+                                </td>
+                            </tr>
+                            {% else %}
+                            {% for stat in source_stats %}
+                            {% set s = stat.source %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-light text-dark border">{{ s.priority }}</span>
+                                </td>
+                                <td>
+                                    <div class="fw-bold text-dark">{{ s.name }}</div>
+                                    <small class="text-muted font-monospace fs-8">{{ s.url | truncate(35) }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary-subtle text-secondary text-uppercase">{{ s.type }}</span>
+                                </td>
+                                <td>
+                                    {% if s.last_status == 'ok' %}
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle">
+                                        <i class="fa-solid fa-circle-check me-1"></i>Healthy
+                                    </span>
+                                    {% elif s.last_status == 'error' %}
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="{{ s.last_error }}">
+                                        <i class="fa-solid fa-circle-xmark me-1"></i>Error
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-warning-subtle text-warning border border-warning-subtle">
+                                        <i class="fa-solid fa-clock me-1"></i>Pending
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark border me-1" title="Live TV">{{ stat.live_count }} TV</span>
+                                    <span class="badge bg-light text-dark border me-1" title="VOD Movies">{{ stat.vod_count }} VOD</span>
+                                    <span class="badge bg-light text-dark border" title="TV Series">{{ stat.series_count }} Series</span>
+                                </td>
+                                <td>
+                                    {% if s.last_refresh %}
+                                    <span class="fs-8 text-secondary">{{ s.last_refresh.strftime('%Y-%m-%d %H:%M') }}</span>
+                                    {% else %}
+                                    <span class="fs-8 text-muted">Never</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="triggerRefreshSource({{ s.id }}, this)" title="Refresh source now">
+                                        <i class="fa-solid fa-rotate"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Stream Playback History Card -->
+        <div class="card shadow-sm border mt-4">
+            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3">
+                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                    <i class="fa-solid fa-clock-rotate-left text-primary"></i> Stream Playback History
+                </h5>
+                <button class="btn btn-sm btn-outline-secondary fs-8 fw-semibold" onclick="openStreamLogsModal()">
+                    <i class="fa-solid fa-list me-1"></i> View Full 30-Day Log
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light fs-8 text-uppercase">
+                            <tr>
+                                <th style="width: 15%;">Type</th>
+                                <th>Stream / Media Title</th>
+                                <th style="width: 22%;">Calling Client IP</th>
+                                <th style="width: 25%;" class="text-end">Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if not recent_stream_logs %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted fs-7">
+                                    <i class="fa-solid fa-play fs-4 mb-2 d-block opacity-50"></i>
+                                    No streams accessed yet. Client playback requests will appear here with caller IP and failover status.
+                                </td>
+                            </tr>
+                            {% else %}
+                            {% for l in recent_stream_logs %}
+                            <tr>
+                                <td>
+                                    {% if l.stream_type == 'movie' %}
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle">VOD Movie</span>
+                                    {% elif l.stream_type == 'live' %}
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Live TV</span>
+                                    {% else %}
+                                    <span class="badge bg-info-subtle text-info border border-info-subtle">Series</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="fw-semibold text-dark">{{ l.stream_title }}</span>
+                                    {% if l.is_failover %}
+                                    <span class="badge bg-warning-subtle text-warning border border-warning-subtle fs-9 ms-1" title="Redirected to secondary backup provider">Failover</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <code class="text-secondary bg-light px-2 py-1 rounded border fs-8">{{ l.client_ip }}</code>
+                                </td>
+                                <td class="text-end text-muted fs-8">
+                                    {{ l.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if l.created_at else '—' }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Side Panel: Quick Actions & Output Gateway -->
+    <div class="col-12 col-lg-4">
+        <div class="card shadow-sm border mb-4">
+            <div class="card-header bg-white border-bottom py-3">
+                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                    <i class="fa-solid fa-bolt text-warning"></i> Quick Operations
+                </h5>
+            </div>
+            <div class="card-body d-flex flex-column gap-2">
+                <button class="btn btn-outline-primary d-flex align-items-center justify-content-between p-3" onclick="triggerRefreshAll(this)">
+                    <span class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-arrows-rotate fs-5"></i>
+                        <span class="text-start">
+                            <strong>Refresh All Sources</strong>
+                            <div class="fs-8 text-secondary">Fetch parallel updates from all providers</div>
+                        </span>
+                    </span>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+
+                <button class="btn btn-outline-warning d-flex align-items-center justify-content-between p-3" onclick="triggerApplyRules(this)">
+                    <span class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-wand-magic-sparkles fs-5"></i>
+                        <span class="text-start">
+                            <strong>Re-apply Rules</strong>
+                            <div class="fs-8 text-secondary">Reorganize library without re-fetching</div>
+                        </span>
+                    </span>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+
+                <button class="btn btn-outline-success d-flex align-items-center justify-content-between p-3" onclick="triggerEnrichTMDB(this)">
+                    <span class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-film fs-5"></i>
+                        <span class="text-start">
+                            <strong>Enrich TMDB</strong>
+                            <div class="fs-8 text-secondary">Fetch posters, plots & ratings batch</div>
+                        </span>
+                    </span>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border">
+            <div class="card-header bg-white border-bottom py-3">
+                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                    <i class="fa-solid fa-plug text-primary"></i> Xtream Output Connection
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="fs-7 text-secondary mb-3">
+                    Connect TiviMate, Smarters, or any IPTV player using these credentials:
+                </p>
+                <div class="mb-2">
+                    <label class="form-label fs-8 text-uppercase text-secondary fw-semibold">Server URL</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control font-monospace" id="serverUrlBox" readonly value="{{ request.base_url }}player_api.php">
+                        <button class="btn btn-outline-secondary" onclick="copyInput('serverUrlBox')"><i class="fa-regular fa-copy"></i></button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fs-8 text-uppercase text-secondary fw-semibold">M3U Playlist URL</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control font-monospace" id="m3uUrlBox" readonly value="{{ request.base_url }}get.php?username=pream&password=pream">
+                        <button class="btn btn-outline-secondary" onclick="copyInput('m3uUrlBox')"><i class="fa-regular fa-copy"></i></button>
+                    </div>
+                </div>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <div class="p-2 rounded bg-light border text-center">
+                            <div class="fs-8 text-muted">Username</div>
+                            <div class="fw-bold font-monospace text-dark">pream</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-2 rounded bg-light border text-center">
+                            <div class="fs-8 text-muted">Password</div>
+                            <div class="fw-bold font-monospace text-dark">pream</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stream Logs Viewer Modal -->
+<div class="modal fade" id="streamLogsModal" tabindex="-1" aria-labelledby="streamLogsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="streamLogsModalLabel">
+                    <i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>Playback History (Last 30 Days)
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="p-3 bg-light border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-primary active" id="btnFilterAll" onclick="filterLogsByType('')">All Streams</button>
+                        <button type="button" class="btn btn-outline-primary" id="btnFilterMovies" onclick="filterLogsByType('movie')">Movies</button>
+                        <button type="button" class="btn btn-outline-primary" id="btnFilterLive" onclick="filterLogsByType('live')">Live TV</button>
+                        <button type="button" class="btn btn-outline-primary" id="btnFilterSeries" onclick="filterLogsByType('series')">Series</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="triggerPurgeLogs()">
+                        <i class="fa-regular fa-trash-can me-1"></i> Purge History (>30d)
+                    </button>
+                </div>
+                <div class="table-responsive" style="max-height: 520px;">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light fs-8 text-uppercase position-sticky top-0">
+                            <tr>
+                                <th style="width: 12%;">Type</th>
+                                <th>Stream / Media Title</th>
+                                <th style="width: 18%;">Calling IP</th>
+                                <th style="width: 25%;">User Agent / Player</th>
+                                <th style="width: 20%;" class="text-end">Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="streamLogsTableBody">
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">
+                                    <span class="spinner-border spinner-border-sm me-2"></span>Loading playback history...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- First Login Onboarding Wizard Modal -->
+{% if first_login %}
+<div class="modal fade" id="onboardingWizardModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="onboardingWizardModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content shadow border-0">
+            <div class="modal-header bg-primary text-white py-3">
+                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="onboardingWizardModalLabel">
+                    <i class="fa-solid fa-satellite-dish"></i> Welcome to Pream!
+                </h5>
+            </div>
+            <div class="modal-body p-4">
+                <p class="fs-6 text-dark mb-1 fw-semibold">
+                    Get started with your self-hosted IPTV library and stream gateway.
+                </p>
+                <p class="fs-7 text-secondary mb-4">
+                    How would you like to set up your environment?
+                </p>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-md-6">
+                        <div class="card h-100 border p-3 hover-shadow cursor-pointer text-center" style="cursor: pointer;" onclick="startImportFromWizard()">
+                            <div class="stat-icon-wrapper rounded-circle bg-info-subtle text-info p-3 d-inline-block mx-auto mb-2">
+                                <i class="fa-solid fa-box-archive fs-3"></i>
+                            </div>
+                            <h6 class="fw-bold text-dark mb-1">Import Settings Backup</h6>
+                            <p class="fs-8 text-secondary mb-0">
+                                Restore previously saved sources, rules, and system configuration from an encrypted JSON backup file.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="card h-100 border p-3 hover-shadow cursor-pointer text-center" style="cursor: pointer;" onclick="location.href='/sources?add=1'">
+                            <div class="stat-icon-wrapper rounded-circle bg-primary-subtle text-primary p-3 d-inline-block mx-auto mb-2">
+                                <i class="fa-solid fa-plus fs-3"></i>
+                            </div>
+                            <h6 class="fw-bold text-dark mb-1">Add Your First Source</h6>
+                            <p class="fs-8 text-secondary mb-0">
+                                Connect an M3U playlist or Xtream Codes provider to ingest Live TV, Movies, and TV Series.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light justify-content-between">
+                <small class="text-secondary">You can always configure settings and import backups later in System Settings.</small>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="dismissOnboarding()">
+                    Dive Straight In <i class="fa-solid fa-arrow-right ms-1"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const obModal = document.getElementById('onboardingWizardModal');
+    if (obModal) {
+        const modal = new bootstrap.Modal(obModal);
+        modal.show();
+    }
+});
+</script>
+{% endif %}
+
+<!-- Import Backup Modal (Available globally for onboarding and settings) -->
+<div class="modal fade" id="importBackupModal" tabindex="-1" aria-labelledby="importBackupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="importBackupModalLabel">
+                    <i class="fa-solid fa-upload text-info me-2"></i>Import Settings Backup
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="importBackupForm" onsubmit="submitImportBackup(event)">
+                <div class="modal-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Restore settings, sources, and transformation rules from an encrypted JSON backup file.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Select Backup File (.json)</label>
+                        <input type="file" class="form-control" id="backupImportFile" accept=".json" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Decryption Passphrase</label>
+                        <input type="password" class="form-control" id="backupImportPassword" placeholder="Passphrase used during export (or admin password)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Restore Mode</label>
+                        <select class="form-select form-select-sm" id="backupImportMode">
+                            <option value="merge" selected>Merge / Update (Keep other sources & rules)</option>
+                            <option value="replace">Replace (Wipe existing sources/rules and overwrite)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold" id="btnRunImport">
+                        <i class="fa-solid fa-rotate me-1"></i> Restore Backup
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

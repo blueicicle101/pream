@@ -1,0 +1,42 @@
+# Version Control
+.git
+.gitignore
+.github
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Databases & Runtime Data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+*.sqlite3
+
+# Environment Files (do not bake secrets into image)
+.env
+.env.*
+!.env.example
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tests & Documentation
+tests/
+docs/
+*.md
+!README.md
+
+# OS Artifacts & Logs
+.DS_Store
+Thumbs.db
+*.log
+

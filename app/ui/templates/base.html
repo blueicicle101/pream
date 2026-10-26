@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('pream_theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        })();
+    </script>
+    <title>{% block title %}{{ server_name }} — Media Gateway{% endblock %}</title>
+    <!-- Bootswatch Zephyr (Modern Light Theme) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/zephyr/bootstrap.min.css">
+    <!-- FontAwesome 6 Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="/static/css/pream.css">
+    <!-- Video.js Player CSS -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <style>
+        .hide{
+    display: none !important;
+}
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-body-tertiary">
+    <!-- Main Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm sticky-top">
+        <div class="container-fluid px-lg-4">
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
+                <span class="brand-icon"><i class="fa-solid fa-satellite-dish"></i></span>
+                <span class="tracking-wide text-white">PREAM</span>
+                <span class="badge bg-white text-primary rounded-pill fs-8 fw-bold">v0.1</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#preamNavbar" aria-controls="preamNavbar" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="preamNavbar">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'dashboard' %}active fw-bold text-white{% endif %}" href="/">
+                            <i class="fa-solid fa-gauge-high me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'sources' %}active fw-bold text-white{% endif %}" href="/sources">
+                            <i class="fa-solid fa-server me-1"></i> Sources
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'library' %}active fw-bold text-white{% endif %}" href="/library">
+                            <i class="fa-solid fa-film me-1"></i> Central Library
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'rules' %}active fw-bold text-white{% endif %}" href="/rules">
+                            <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Rules Engine
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'settings' %}active fw-bold text-white{% endif %}" href="/settings">
+                            <i class="fa-solid fa-sliders me-1"></i> Settings
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 rounded-pill">
+                        <i class="fa-solid fa-circle text-success fs-8 me-1 animate-pulse"></i> Online
+                    </span>
+                    <a href="/logout" class="btn btn-sm text-bg-primary btn-outline-light d-flex align-items-center gap-1" title="Sign out of Pream Admin">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                        <span class="d-none d-sm-inline">Logout</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="container-fluid px-lg-4 py-4">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Global Video Player Modal (Video.js + HLS.js + mpegts.js + Desktop Launcher) -->
+    <div class="modal fade" id="streamPlayerModal" tabindex="-1" aria-labelledby="streamPlayerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border">
+                <div class="modal-header">
+                    <h5 class="modal-title d-flex align-items-center gap-2" id="streamPlayerModalLabel">
+                        <i class="fa-solid fa-circle-play text-primary"></i> <span id="playerStreamTitle">Stream Preview</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" onclick="stopPlayer()"></button>
+                </div>
+                <div class="modal-body p-0 bg-black position-relative" style="min-height: 380px;">
+                    <!-- Normal Video Container -->
+                    <div id="playerVideoContainer" class="ratio ratio-16x9">
+                        <video id="preamVideo" class="video-js vjs-default-skin vjs-big-play-centered w-100 h-100" controls preload="auto" playsinline></video>
+                    </div>
+
+                    <!-- Fallback / Codec / MKV Notice Container -->
+                    <div id="playerFallbackContainer" class="d-none d-flex flex-column align-items-center justify-content-center p-4 text-center" style="min-height: 380px; background: #0f172a;">
+                        <div class="stat-icon-wrapper rounded-circle bg-warning-subtle text-warning p-3 mb-3">
+                            <i class="fa-solid fa-file-video fs-2"></i>
+                        </div>
+                        <div class="badge bg-warning text-dark mb-2 fw-bold" id="playerFallbackBadge">
+                            <i class="fa-solid fa-triangle-exclamation me-1"></i> Format / Codec Notice
+                        </div>
+                        <h5 class="fw-bold text-white mb-2" id="playerFallbackTitle">Matroska (.mkv) Format Detected</h5>
+                        <p class="fs-7 text-secondary mb-4 mx-auto" id="playerFallbackMessage" style="max-width: 520px;">
+                            Web browsers (Chrome, Firefox, Safari) cannot decode <code>.mkv</code> video containers or Dolby/DTS audio natively. Launch this stream directly in VLC, MPV, or your desktop media player:
+                        </p>
+                        <div class="d-flex justify-content-center gap-2 flex-wrap mb-3">
+                            <a href="#" id="playerLauncherBtn" class="btn btn-primary btn-sm fw-bold px-3">
+                                <i class="fa-solid fa-play me-1"></i> Desktop Player (.m3u)
+                            </a>
+                            <a href="#" id="playerVlcBtn" class="btn btn-outline-warning btn-sm fw-semibold">
+                                <i class="fa-solid fa-cone me-1"></i> Launch in VLC
+                            </a>
+                            <button type="button" class="btn btn-outline-light btn-sm text-light" onclick="copyPlayerStreamUrl()">
+                                <i class="fa-regular fa-copy me-1"></i> Copy Direct URL
+                            </button>
+                            <button type="button" class="btn btn-outline-info btn-sm d-none" id="playerProxyRetryBtn" onclick="retryWithProxy()">
+                                <i class="fa-solid fa-rotate me-1"></i> Retry with Proxy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <div class="d-flex align-items-center gap-2 overflow-hidden">
+                        <span class="badge bg-secondary-subtle text-secondary border fs-9" id="playerStreamFormat">HLS / Video</span>
+                        <small class="text-secondary text-truncate font-monospace" id="playerStreamUrl"></small>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <a href="#" id="footerLauncherLink" class="btn btn-outline-primary btn-sm py-1 fs-8" title="Download .m3u launcher for desktop players">
+                            <i class="fa-solid fa-up-right-from-square me-1"></i> Open in VLC / Desktop
+                        </a>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" onclick="stopPlayer()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer Status Banner -->
+    <footer id="preamFooterBanner" class="pream-footer-banner border-top bg-body shadow-sm py-2 px-3">
+        <div class="container-fluid px-lg-4 d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2 overflow-hidden">
+                <span id="footerStatusDot" class="status-dot status-dot-idle flex-shrink-0"></span>
+                <span id="footerTaskTitle" class="fw-semibold text-body fs-7 flex-shrink-0">Idle</span>
+                <span class="text-secondary opacity-50 flex-shrink-0">|</span>
+                <span id="footerTaskMessage" class="text-muted fs-7 text-truncate" style="max-width: 650px;">System ready</span>
+            </div>
+            <div class="d-flex align-items-center gap-3 ms-auto">
+                <div id="footerProgressWrapper" class="d-none align-items-center gap-2">
+                    <div id="footerSingleProgress" class="d-flex align-items-center gap-2" style="min-width: 140px;">
+                        <div class="progress flex-grow-1" style="height: 6px; width: 100px;">
+                            <div id="footerProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <span id="footerProgressPercent" class="text-primary fs-8 fw-semibold">0%</span>
+                    </div>
+                    <div id="footerMultiWorkers" class="d-none align-items-center gap-2 flex-wrap"></div>
+                </div>
+                <span class="badge bg-light text-secondary border fs-8" id="footerServerInfo">
+                    <i class="fa-solid fa-server me-1"></i> {{ server_name }}
+                </span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container position-fixed end-0 p-3" style="bottom: 45px; z-index: 1090;">
+        <div id="preamToast" class="toast align-items-center text-bg-primary border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage">Action completed.</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <!-- HLS.js for IPTV streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!-- mpegts.js for live TS MSE transmuxing -->
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.js"></script>
+    <!-- Video.js 8 Player -->
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <!-- Custom Pream JS -->
+    <script src="/static/js/pream.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
+
