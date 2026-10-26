@@ -4,6 +4,9 @@
 
 Inspired by *Tuliprox*, Pream unifies multiple upstream Xtream Codes and M3U playlists into a single clean, curated, and organized library for your IPTV players (TiviMate, IPTV Smarters, VLC, Apple TV, etc.).
 
+### DISCLAIMER
+<span style="color:'red !important';"> This project does not condone the use of illegally sourced IPTV content and this software does not include any source by default.</span>
+
 ---
 
 ## ✨ Features
