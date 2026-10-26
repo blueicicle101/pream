@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     TMDB_API_KEY: str = ""
     TMDB_RATE_LIMIT: float = 0.05  # Delay in seconds between TMDB API requests (20 req/s safe)
 
+    # ── Gemini AI Title Extraction ──
+    GEMINI_API_KEY: str = ""
+    STAGGERED_GEMINI_CALLS: bool = True  # Stagger Gemini calls to stay safely within free/tier rate limits (15 RPM)
+    GEMINI_RATE_DELAY: float = 4.0  # Seconds between staggered Gemini API calls (15 req/min = 4s)
+
     # ── Telegram Notifications ──
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""

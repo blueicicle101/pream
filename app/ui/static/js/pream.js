@@ -715,7 +715,7 @@ async function triggerRefreshAll(btn) {
 }
 
 async function triggerCancelAll(btn) {
-    if (!confirm('Are you sure you want to cancel all running and queued source refreshes?')) return;
+    if (!confirm('Are you sure you want to cancel all running and queued tasks (including TMDB enrichment)?')) return;
     const originalHtml = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
@@ -723,14 +723,13 @@ async function triggerCancelAll(btn) {
     }
 
     try {
-        const resp = await fetch('/api/sources/cancel-refresh', { method: 'POST' });
-        const res = await resp.json();
-        if (res.status === 'ok') {
-            showToast(res.message || 'All refreshes cancelled');
-            updateFooterTaskProgress();
-        } else {
-            showToast(`Error: ${res.error_message || res.detail || 'Failed to cancel refreshes'}`, true);
-        }
+        // Cancel both source refreshes and TMDB enrichment
+        const [resp1, resp2] = await Promise.allSettled([
+            fetch('/api/sources/cancel-refresh', { method: 'POST' }),
+            fetch('/api/tmdb/cancel', { method: 'POST' }),
+        ]);
+        showToast('Cancellation requested for active tasks and enrichment.');
+        updateFooterTaskProgress();
     } catch (err) {
         showToast(err.message, true);
     } finally {
@@ -1315,7 +1314,8 @@ async function enrichSingleItem(contentType, itemId, btn) {
         const resp = await fetch(endpoint, { method: 'POST' });
         const res = await resp.json();
         if (res.status === 'ok') {
-            showToast(`Enriched "${res.title}" via TMDB!`);
+            const dupMsg = res.duplicates_synced > 0 ? ` (and synced ${res.duplicates_synced} duplicate stream(s))` : '';
+            showToast(`Enriched "${res.title}" via TMDB${dupMsg}!`);
             setTimeout(() => window.location.reload(), 800);
         } else if (res.status === 'not_found') {
             showToast(`No automatic match for "${res.title}". Opening search...`);

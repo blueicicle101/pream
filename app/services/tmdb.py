@@ -6,6 +6,7 @@ and optionally reorganizes movies/series into '<LANG> | <GENRE>' display groups.
 import asyncio
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,9 +17,49 @@ from app.config import settings
 from app.models.movie import Movie
 from app.models.series import Series
 from app.models.setting import Setting
+from app.services.gemini import (
+    extract_title_with_gemini,
+    get_gemini_api_key,
+    get_gemini_rate_delay,
+    is_staggered_gemini_calls_enabled,
+)
 from app.services.task_status import set_task_status
 
 logger = logging.getLogger(__name__)
+
+# Cancellation flag and active task tracker for TMDB enrichment
+_tmdb_cancel_requested: bool = False
+_tmdb_active_task: Optional[asyncio.Task] = None
+
+
+def request_tmdb_cancellation() -> None:
+    """Signal active TMDB enrichment to cancel immediately."""
+    global _tmdb_cancel_requested, _tmdb_active_task
+    _tmdb_cancel_requested = True
+    if _tmdb_active_task and not _tmdb_active_task.done():
+        try:
+            _tmdb_active_task.cancel()
+        except Exception:
+            pass
+
+
+def is_tmdb_cancelled() -> bool:
+    """Check if cancellation has been requested for TMDB enrichment."""
+    global _tmdb_cancel_requested
+    return _tmdb_cancel_requested
+
+
+def reset_tmdb_cancellation() -> None:
+    """Reset cancellation state before starting a new run."""
+    global _tmdb_cancel_requested
+    _tmdb_cancel_requested = False
+
+
+def register_active_tmdb_task(task: asyncio.Task) -> None:
+    """Register current asyncio task running TMDB enrichment."""
+    global _tmdb_active_task
+    _tmdb_active_task = task
+
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
@@ -101,6 +142,79 @@ def clean_media_title(raw_name: str) -> Tuple[str, Optional[int]]:
     cleaned = re.sub(r"[\(\[\{\)\]\}]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or raw_name, year
+
+
+def is_latin_script(text: Optional[str]) -> bool:
+    """
+    Check if a text string is in readable Latin script (including accented characters
+    like é, à, ü, ñ, etc., as well as digits, spaces, and common punctuation).
+    Returns False for non-Latin scripts such as Devanagari (चाँदनी), Cyrillic (Брат),
+    Han/Kanji/CJK (千と千尋の神隠し / 寄生虫), Arabic, Hangul, Greek, Hebrew, Thai, etc.
+    """
+    if not text:
+        return True
+    has_letters = False
+    for ch in text:
+        if ch.isalpha():
+            has_letters = True
+            try:
+                name = unicodedata.name(ch, "")
+                if "LATIN" not in name:
+                    return False
+            except Exception:
+                return False
+    return has_letters or bool(text.strip())
+
+
+def choose_best_display_title(
+    localized_title: Optional[str],
+    original_title: Optional[str],
+    fallback_title: Optional[str] = None,
+) -> str:
+    """
+    Select the best human-readable display title:
+    1. If localized_title (English) is present and in Latin script, use it (e.g. 'Chandni', 'Spirited Away').
+    2. If localized_title is non-Latin but original_title is in Latin script (e.g. French 'Le Fabuleux Destin d\'Amélie Poulain'), keep it.
+    3. If both are non-Latin (Devanagari, Cyrillic, Kanji), prefer the localized Latin title if available; else fallback_title.
+    Safety Net: Never returns an empty or whitespace-only string; guarantees a fallback title.
+    """
+    clean_loc = (localized_title or "").strip()
+    clean_orig = (original_title or "").strip()
+
+    if clean_loc and is_latin_script(clean_loc):
+        return clean_loc
+
+    if clean_orig and is_latin_script(clean_orig):
+        return clean_orig
+
+    if clean_loc:
+        return clean_loc
+
+    if clean_orig:
+        return clean_orig
+
+    return (fallback_title or "").strip() or "Untitled"
+
+
+def sanitize_display_name_and_group(
+    candidate_name: Optional[str],
+    fallback_name: Optional[str],
+    candidate_group: Optional[str],
+    fallback_group: Optional[str],
+) -> Tuple[str, str]:
+    """
+    Safety net to guarantee that display_name and display_group are NEVER left empty or blank.
+    If enrichment generates an empty/null candidate, falls back safely to previous or raw values.
+    """
+    name = (candidate_name or "").strip()
+    if not name:
+        name = (fallback_name or "").strip() or "Untitled"
+
+    group = (candidate_group or "").strip()
+    if not group:
+        group = (fallback_group or "").strip() or "Uncategorized"
+
+    return name, group
 
 
 def detect_language_code(group_name: Optional[str]) -> str:
@@ -224,10 +338,38 @@ async def search_tv_tmdb(
     return [] if return_all else None
 
 
-async def enrich_movie(movie: Movie, api_key: str) -> bool:
-    """Enrich a single movie record with TMDB metadata."""
+async def enrich_movie(movie: Movie, api_key: str, db: Optional[Session] = None) -> bool:
+    """
+    Enrich a single movie record with TMDB metadata.
+    Uses regex cleaner first; falls back to Gemini Flash-Lite if available and needed.
+    """
     clean_title, year = clean_media_title(movie.raw_name)
     result = await search_movie_tmdb(clean_title, year or movie.year, api_key)
+
+    ai_lang_code = None
+    # If regex search yields no match and Gemini API key is available, attempt AI extraction
+    gemini_key = get_gemini_api_key(db)
+    if not result and gemini_key:
+        stagger = is_staggered_gemini_calls_enabled(db)
+        delay = get_gemini_rate_delay(db)
+        ai_data = await extract_title_with_gemini(
+            raw_title=movie.raw_name,
+            raw_group=movie.raw_group or movie.display_group,
+            media_type="movie",
+            api_key=gemini_key,
+            stagger=stagger,
+            delay_seconds=delay,
+        )
+        if ai_data and ai_data.get("clean_title"):
+            clean_title = ai_data["clean_title"]
+            year = ai_data.get("year") or year
+            ai_lang_code = ai_data.get("language_code")
+            tmdb_lang = ai_data.get("tmdb_language")
+            # Retry TMDB search with AI-extracted title and language
+            result = await search_movie_tmdb(clean_title, year or movie.year, api_key, language=tmdb_lang)
+            if not result and tmdb_lang:
+                # Retry without strict language filter in case TMDB indexing is in original language
+                result = await search_movie_tmdb(clean_title, year or movie.year, api_key)
 
     now = datetime.now(timezone.utc)
     movie.tmdb_fetched_at = now
@@ -236,8 +378,12 @@ async def enrich_movie(movie: Movie, api_key: str) -> bool:
         return False
 
     movie.tmdb_id = result.get("id")
-    # Update display name to the clean official TMDB title
-    official_title = result.get("title") or result.get("original_title") or clean_title
+    # Update display name to the clean readable title (English/Latin preferred for non-Latin scripts)
+    official_title = choose_best_display_title(
+        localized_title=result.get("title"),
+        original_title=result.get("original_title"),
+        fallback_title=clean_title,
+    )
     if official_title:
         movie.display_name = official_title
 
@@ -260,19 +406,52 @@ async def enrich_movie(movie: Movie, api_key: str) -> bool:
     genre_names = [GENRE_MAP.get(gid) for gid in genre_ids if GENRE_MAP.get(gid)]
     if genre_names:
         movie.genre = ", ".join(genre_names)
-        if is_tmdb_auto_group_enabled():
+        if is_tmdb_auto_group_enabled(db):
             primary_genre = genre_names[0]
-            # Re-group by language + genre: "<LANG> | <GENRE>"
-            lang = detect_language_code(movie.raw_group or movie.display_group)
+            # Use AI detected language code if available, else group prefix detection
+            lang = ai_lang_code or detect_language_code(movie.raw_group or movie.display_group)
             movie.display_group = f"{lang} | {primary_genre}"
+
+    # Safety Net: Guarantee display_name and display_group never become blank
+    movie.display_name, movie.display_group = sanitize_display_name_and_group(
+        candidate_name=movie.display_name,
+        fallback_name=movie.raw_name,
+        candidate_group=movie.display_group,
+        fallback_group=movie.raw_group,
+    )
 
     return True
 
 
-async def enrich_series(series: Series, api_key: str) -> bool:
-    """Enrich a single TV series record with TMDB metadata."""
+async def enrich_series(series: Series, api_key: str, db: Optional[Session] = None) -> bool:
+    """
+    Enrich a single TV series record with TMDB metadata.
+    Uses regex cleaner first; falls back to Gemini Flash-Lite if available and needed.
+    """
     clean_title, year = clean_media_title(series.raw_name)
     result = await search_tv_tmdb(clean_title, year or series.year, api_key)
+
+    ai_lang_code = None
+    gemini_key = get_gemini_api_key(db)
+    if not result and gemini_key:
+        stagger = is_staggered_gemini_calls_enabled(db)
+        delay = get_gemini_rate_delay(db)
+        ai_data = await extract_title_with_gemini(
+            raw_title=series.raw_name,
+            raw_group=series.raw_group or series.display_group,
+            media_type="series",
+            api_key=gemini_key,
+            stagger=stagger,
+            delay_seconds=delay,
+        )
+        if ai_data and ai_data.get("clean_title"):
+            clean_title = ai_data["clean_title"]
+            year = ai_data.get("year") or year
+            ai_lang_code = ai_data.get("language_code")
+            tmdb_lang = ai_data.get("tmdb_language")
+            result = await search_tv_tmdb(clean_title, year or series.year, api_key, language=tmdb_lang)
+            if not result and tmdb_lang:
+                result = await search_tv_tmdb(clean_title, year or series.year, api_key)
 
     now = datetime.now(timezone.utc)
     series.tmdb_fetched_at = now
@@ -281,8 +460,12 @@ async def enrich_series(series: Series, api_key: str) -> bool:
         return False
 
     series.tmdb_id = result.get("id")
-    # Update display name to the clean official TMDB name
-    official_name = result.get("name") or result.get("original_name") or clean_title
+    # Update display name to the clean readable series name (English/Latin preferred for non-Latin scripts)
+    official_name = choose_best_display_title(
+        localized_title=result.get("name"),
+        original_title=result.get("original_name"),
+        fallback_title=clean_title,
+    )
     if official_name:
         series.display_name = official_name
 
@@ -301,10 +484,18 @@ async def enrich_series(series: Series, api_key: str) -> bool:
     genre_names = [GENRE_MAP.get(gid) for gid in genre_ids if GENRE_MAP.get(gid)]
     if genre_names:
         series.genre = ", ".join(genre_names)
-        if is_tmdb_auto_group_enabled():
+        if is_tmdb_auto_group_enabled(db):
             primary_genre = genre_names[0]
-            lang = detect_language_code(series.raw_group or series.display_group)
+            lang = ai_lang_code or detect_language_code(series.raw_group or series.display_group)
             series.display_group = f"{lang} | {primary_genre}"
+
+    # Safety Net: Guarantee display_name and display_group never become blank
+    series.display_name, series.display_group = sanitize_display_name_and_group(
+        candidate_name=series.display_name,
+        fallback_name=series.raw_name,
+        candidate_group=series.display_group,
+        fallback_group=series.raw_group,
+    )
 
     return True
 
@@ -363,6 +554,7 @@ async def enrich_pending_media(
 
     target_total = min(catalog_total, max_items) if max_items else (catalog_total if (continuous or group) else min(catalog_total, batch_size))
     scope_desc = f" in group '{group}'" if group else ""
+    reset_tmdb_cancellation()
     set_task_status("running", "TMDB Enrichment", f"Starting enrichment for {target_total} items{scope_desc}...", 5)
 
     total_movies_processed = 0
@@ -370,10 +562,17 @@ async def enrich_pending_media(
     total_series_processed = 0
     total_series_enriched = 0
     processed_count = 0
+    was_cancelled = False
 
     chunk_size = min(batch_size, 100)
 
     while True:
+        # Check cancellation request
+        if is_tmdb_cancelled():
+            was_cancelled = True
+            logger.info("TMDB enrichment cancelled by user request.")
+            break
+
         # Check how many more we need
         if max_items and processed_count >= max_items:
             break
@@ -408,6 +607,10 @@ async def enrich_pending_media(
 
         # Process movies batch
         for movie in pending_movies:
+            if is_tmdb_cancelled():
+                was_cancelled = True
+                break
+
             processed_count += 1
             total_movies_processed += 1
             pct = max(5, min(95, int((processed_count / max(1, target_total)) * 95)))
@@ -418,14 +621,24 @@ async def enrich_pending_media(
                 f"Enriching [{processed_count}/{target_total}]: '{clean_title}'...",
                 pct,
             )
-            if await enrich_movie(movie, api_key):
+            if await enrich_movie(movie, api_key, db=db):
                 total_movies_enriched += 1
+                dup_count = await sync_duplicate_movies(movie, db)
+                total_movies_enriched += dup_count
 
             if rate_delay > 0:
                 await asyncio.sleep(rate_delay)
 
+        if was_cancelled:
+            db.commit()
+            break
+
         # Process series batch
         for s in pending_series:
+            if is_tmdb_cancelled():
+                was_cancelled = True
+                break
+
             processed_count += 1
             total_series_processed += 1
             pct = max(5, min(95, int((processed_count / max(1, target_total)) * 95)))
@@ -436,14 +649,19 @@ async def enrich_pending_media(
                 f"Enriching [{processed_count}/{target_total}]: '{clean_title}'...",
                 pct,
             )
-            if await enrich_series(s, api_key):
+            if await enrich_series(s, api_key, db=db):
                 total_series_enriched += 1
+                dup_count = await sync_duplicate_series(s, db)
+                total_series_enriched += dup_count
 
             if rate_delay > 0:
                 await asyncio.sleep(rate_delay)
 
         # Commit batch to database incrementally so progress persists
         db.commit()
+
+        if was_cancelled:
+            break
 
         # If not running continuously and not bounded by max_items and not group-scoped, stop after first batch
         if not continuous and not max_items and not group:
@@ -461,18 +679,103 @@ async def enrich_pending_media(
         .count()
     ) if should_include_series else 0
 
+    status_title = "Cancelled" if was_cancelled else "Complete"
+    status_code = "cancelled" if was_cancelled else "completed"
     msg = f"Enriched {total_movies_enriched} movies, {total_series_enriched} series. {remaining_movies + remaining_series} remaining."
+    if was_cancelled:
+        msg = f"Enrichment stopped by user: {msg}"
     logger.info(f"TMDB enrichment finished: {msg}")
-    set_task_status("completed", "Complete", f"TMDB enrichment complete: {msg}", 100)
+    set_task_status(status_code, status_title, msg, 100 if not was_cancelled else pct)
 
     return {
-        "status": "ok",
+        "status": "cancelled" if was_cancelled else "ok",
         "movies_processed": total_movies_processed,
         "movies_enriched": total_movies_enriched,
         "series_processed": total_series_processed,
         "series_enriched": total_series_enriched,
         "catalog_remaining": remaining_movies + remaining_series,
     }
+
+
+async def sync_duplicate_movies(movie: Movie, db: Session) -> int:
+    """
+    Copy TMDB enrichment attributes from the enriched movie to all unenriched
+    duplicates having the exact same raw_name and raw_group.
+    Returns the count of duplicates updated.
+    """
+    if not movie or not movie.tmdb_id:
+        return 0
+
+    duplicates = (
+        db.query(Movie)
+        .filter(
+            Movie.id != movie.id,
+            Movie.raw_name == movie.raw_name,
+            Movie.raw_group == movie.raw_group,
+            Movie.tmdb_fetched_at == None,
+        )
+        .all()
+    )
+
+    for dup in duplicates:
+        dup.tmdb_id = movie.tmdb_id
+        dup.tmdb_fetched_at = movie.tmdb_fetched_at
+        dup.display_name, dup.display_group = sanitize_display_name_and_group(
+            candidate_name=movie.display_name,
+            fallback_name=dup.raw_name,
+            candidate_group=movie.display_group,
+            fallback_group=dup.raw_group,
+        )
+        dup.poster_url = movie.poster_url
+        dup.backdrop_url = movie.backdrop_url
+        dup.plot = movie.plot
+        dup.rating = movie.rating
+        dup.year = movie.year
+        dup.genre = movie.genre
+
+    if duplicates:
+        logger.info(f"Synchronized TMDB metadata to {len(duplicates)} exact duplicate movie(s) for '{movie.raw_name}'")
+    return len(duplicates)
+
+
+async def sync_duplicate_series(series: Series, db: Session) -> int:
+    """
+    Copy TMDB enrichment attributes from the enriched series to all unenriched
+    duplicates having the exact same raw_name and raw_group.
+    Returns the count of duplicates updated.
+    """
+    if not series or not series.tmdb_id:
+        return 0
+
+    duplicates = (
+        db.query(Series)
+        .filter(
+            Series.id != series.id,
+            Series.raw_name == series.raw_name,
+            Series.raw_group == series.raw_group,
+            Series.tmdb_fetched_at == None,
+        )
+        .all()
+    )
+
+    for dup in duplicates:
+        dup.tmdb_id = series.tmdb_id
+        dup.tmdb_fetched_at = series.tmdb_fetched_at
+        dup.display_name, dup.display_group = sanitize_display_name_and_group(
+            candidate_name=series.display_name,
+            fallback_name=dup.raw_name,
+            candidate_group=series.display_group,
+            fallback_group=dup.raw_group,
+        )
+        dup.poster_url = series.poster_url
+        dup.plot = series.plot
+        dup.rating = series.rating
+        dup.year = series.year
+        dup.genre = series.genre
+
+    if duplicates:
+        logger.info(f"Synchronized TMDB metadata to {len(duplicates)} exact duplicate series for '{series.raw_name}'")
+    return len(duplicates)
 
 
 async def enrich_single_movie(movie_id: int, db: Session) -> Dict[str, Any]:
@@ -487,13 +790,17 @@ async def enrich_single_movie(movie_id: int, db: Session) -> Dict[str, Any]:
     if not movie:
         return {"status": "error", "reason": f"Movie {movie_id} not found"}
 
-    matched = await enrich_movie(movie, api_key)
+    matched = await enrich_movie(movie, api_key, db=db)
+    synced_count = 0
+    if matched:
+        synced_count = await sync_duplicate_movies(movie, db)
     db.commit()
     return {
         "status": "ok" if matched else "not_found",
         "movie_id": movie.id,
         "title": movie.display_name,
         "matched": matched,
+        "duplicates_synced": synced_count,
         "poster_url": movie.poster_url,
         "plot": movie.plot,
         "rating": movie.rating,
@@ -514,13 +821,17 @@ async def enrich_single_series(series_id: int, db: Session) -> Dict[str, Any]:
     if not series:
         return {"status": "error", "reason": f"Series {series_id} not found"}
 
-    matched = await enrich_series(series, api_key)
+    matched = await enrich_series(series, api_key, db=db)
+    synced_count = 0
+    if matched:
+        synced_count = await sync_duplicate_series(series, db)
     db.commit()
     return {
         "status": "ok" if matched else "not_found",
         "series_id": series.id,
         "title": series.display_name,
         "matched": matched,
+        "duplicates_synced": synced_count,
         "poster_url": series.poster_url,
         "plot": series.plot,
         "rating": series.rating,
@@ -625,7 +936,11 @@ async def apply_tmdb_id_match(
         series.tmdb_id = detail.get("id")
         series.tmdb_fetched_at = now
 
-        name = detail.get("name") or detail.get("original_name")
+        name = choose_best_display_title(
+            localized_title=detail.get("name"),
+            original_title=detail.get("original_name"),
+            fallback_title=series.display_name,
+        )
         if name:
             series.display_name = name
 
@@ -647,11 +962,22 @@ async def apply_tmdb_id_match(
                 lang = detect_language_code(series.raw_group or series.display_group)
                 series.display_group = f"{lang} | {genres[0]}"
 
+        # Safety Net: Guarantee display_name and display_group never become blank
+        series.display_name, series.display_group = sanitize_display_name_and_group(
+            candidate_name=series.display_name,
+            fallback_name=series.raw_name,
+            candidate_group=series.display_group,
+            fallback_group=series.raw_group,
+        )
+
+        # Sync exact duplicate series across sources
+        dup_count = await sync_duplicate_series(series, db)
         db.commit()
         return {
             "status": "ok",
             "item_id": series.id,
             "title": series.display_name,
+            "duplicates_synced": dup_count,
             "poster_url": series.poster_url,
             "year": series.year,
             "rating": series.rating,
@@ -667,7 +993,11 @@ async def apply_tmdb_id_match(
         movie.tmdb_id = detail.get("id")
         movie.tmdb_fetched_at = now
 
-        title = detail.get("title") or detail.get("original_title")
+        title = choose_best_display_title(
+            localized_title=detail.get("title"),
+            original_title=detail.get("original_title"),
+            fallback_title=movie.display_name,
+        )
         if title:
             movie.display_name = title
 
@@ -693,11 +1023,22 @@ async def apply_tmdb_id_match(
                 lang = detect_language_code(movie.raw_group or movie.display_group)
                 movie.display_group = f"{lang} | {genres[0]}"
 
+        # Safety Net: Guarantee display_name and display_group never become blank
+        movie.display_name, movie.display_group = sanitize_display_name_and_group(
+            candidate_name=movie.display_name,
+            fallback_name=movie.raw_name,
+            candidate_group=movie.display_group,
+            fallback_group=movie.raw_group,
+        )
+
+        # Sync exact duplicate movies across sources
+        dup_count = await sync_duplicate_movies(movie, db)
         db.commit()
         return {
             "status": "ok",
             "item_id": movie.id,
             "title": movie.display_name,
+            "duplicates_synced": dup_count,
             "poster_url": movie.poster_url,
             "year": movie.year,
             "rating": movie.rating,

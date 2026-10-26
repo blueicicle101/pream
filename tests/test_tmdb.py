@@ -14,11 +14,14 @@ from app.models.series import Series
 from app.models.source import Source
 from app.services.tmdb import (
     apply_tmdb_id_match,
+    choose_best_display_title,
     clean_media_title,
     detect_language_code,
     enrich_movie,
     enrich_pending_media,
     enrich_series,
+    is_latin_script,
+    sanitize_display_name_and_group,
     search_tmdb_candidates,
 )
 
@@ -226,6 +229,158 @@ class TMDBEnrichmentTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(movie.display_group, "FR | Action")
             self.assertEqual(movie.raw_name, "Avatar.2009.Extended.Cut.1080p")
             self.assertEqual(movie.raw_group, "FR | Movies")
+
+    @patch("app.services.tmdb.search_movie_tmdb")
+    @patch("app.services.tmdb.extract_title_with_gemini")
+    async def test_05_gemini_fallback_enrichment(self, mock_gemini, mock_search):
+        """Test intelligent title extraction with Gemini fallback and staggered calls."""
+        movie = Movie(
+            source_id=self.source.id,
+            raw_name="[NL/FR] De.Schaduw.van.het.Verleden.2023.HDR",
+            display_name="[NL/FR] De.Schaduw.van.het.Verleden.2023.HDR",
+            raw_group="Foreign VOD",
+            display_group="Foreign VOD",
+        )
+        self.db.add(movie)
+        self.db.commit()
+
+        # Step 1: Initial regex search fails
+        # Step 2: Gemini returns extracted data
+        mock_gemini.return_value = {
+            "clean_title": "De Schaduw van het Verleden",
+            "year": 2023,
+            "language_code": "NL",
+            "tmdb_language": "nl-NL",
+        }
+
+        # Step 3: Second search with clean title succeeds
+        mock_search.side_effect = [
+            None,  # First try with regex fails
+            {      # Second try with Gemini extracted title succeeds
+                "id": 8888,
+                "title": "De Schaduw van het Verleden",
+                "poster_path": "/shadow.jpg",
+                "overview": "Een spannende thriller...",
+                "vote_average": 7.9,
+                "release_date": "2023-04-10",
+                "genre_ids": [53],  # Thriller
+            },
+        ]
+
+        with patch("app.services.tmdb.get_gemini_api_key", return_value="fake_gemini_key"):
+            success = await enrich_movie(movie, api_key="fake_tmdb_key", db=self.db)
+            self.assertTrue(success)
+            self.assertEqual(movie.tmdb_id, 8888)
+            self.assertEqual(movie.display_name, "De Schaduw van het Verleden")
+            self.assertEqual(movie.year, 2023)
+            # Group updated using Gemini language code NL + TMDB Genre Thriller
+            self.assertEqual(movie.display_group, "NL | Thriller")
+            mock_gemini.assert_called_once()
+
+    @patch("app.services.tmdb.search_movie_tmdb")
+    async def test_06_sync_exact_duplicate_media(self, mock_search):
+        """Test that enriching an item propagates TMDB metadata to all exact title+group duplicates."""
+        # Source 1 movie
+        m1 = Movie(
+            source_id=self.source.id,
+            raw_name="Top.Gun.Maverick.2022.1080p",
+            display_name="Top.Gun.Maverick.2022.1080p",
+            raw_group="US | Action",
+            display_group="US | Action",
+        )
+        # Source 2 duplicate movie (exact same raw_name and raw_group)
+        m2 = Movie(
+            source_id=self.source.id,
+            raw_name="Top.Gun.Maverick.2022.1080p",
+            display_name="Top.Gun.Maverick.2022.1080p",
+            raw_group="US | Action",
+            display_group="US | Action",
+        )
+        self.db.add_all([m1, m2])
+        self.db.commit()
+
+        mock_search.return_value = {
+            "id": 361743,
+            "title": "Top Gun: Maverick",
+            "poster_path": "/topgun.jpg",
+            "backdrop_path": "/topgun_bg.jpg",
+            "overview": "After thirty years, Maverick continues to push the envelope...",
+            "vote_average": 8.3,
+            "release_date": "2022-05-24",
+            "genre_ids": [28],  # Action
+        }
+
+        from app.services.tmdb import enrich_single_movie
+        res = await enrich_single_movie(m1.id, self.db)
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["duplicates_synced"], 1)
+
+        # Refresh m2 from DB
+        self.db.refresh(m2)
+        self.assertEqual(m2.tmdb_id, 361743)
+        self.assertEqual(m2.display_name, "Top Gun: Maverick")
+        self.assertEqual(m2.year, 2022)
+        self.assertEqual(m2.rating, 8.3)
+        self.assertEqual(m2.display_group, "US | Action")
+        self.assertIsNotNone(m2.tmdb_fetched_at)
+
+    def test_07_latin_script_and_english_title_priority(self):
+        """Test Latin script detection and picking readable English/Latin titles over non-Latin scripts."""
+        # 1. Latin script detection
+        self.assertTrue(is_latin_script("Chandni"))
+        self.assertTrue(is_latin_script("Amélie"))
+        self.assertTrue(is_latin_script("El Secreto de sus Ojos"))
+        self.assertTrue(is_latin_script("Das Boot"))
+        self.assertFalse(is_latin_script("चाँदनी"))          # Devanagari / Hindi
+        self.assertFalse(is_latin_script("千と千尋の神隠し"))   # Japanese / Kanji
+        self.assertFalse(is_latin_script("Брат"))           # Russian / Cyrillic
+        self.assertFalse(is_latin_script("기생충"))          # Korean / Hangul
+
+        # 2. English localization priority for non-Latin titles (e.g. Hindi Chandni)
+        title = choose_best_display_title(
+            localized_title="Chandni",
+            original_title="चाँदनी",
+            fallback_title="Chandni 1989",
+        )
+        self.assertEqual(title, "Chandni")
+
+        # 3. Japanese Spirited Away
+        title = choose_best_display_title(
+            localized_title="Spirited Away",
+            original_title="千と千尋の神隠し",
+            fallback_title="Sen to Chihiro",
+        )
+        self.assertEqual(title, "Spirited Away")
+
+        # 4. French title in Latin script preserved (e.g. Amélie or original French title)
+        title = choose_best_display_title(
+            localized_title="Amélie",
+            original_title="Le Fabuleux Destin d'Amélie Poulain",
+            fallback_title="Amelie",
+        )
+        self.assertEqual(title, "Amélie")
+
+    def test_08_safety_net_prevents_blank_name_or_group(self):
+        """Test that enrichment safety nets never leave display_name or display_group blank."""
+        # Test direct sanitizer helper
+        name, group = sanitize_display_name_and_group(
+            candidate_name="   ",
+            fallback_name="Inception (2010)",
+            candidate_group="",
+            fallback_group="Action Movies",
+        )
+        self.assertEqual(name, "Inception (2010)")
+        self.assertEqual(group, "Action Movies")
+
+        # None candidates fallback
+        name, group = sanitize_display_name_and_group(
+            candidate_name=None,
+            fallback_name="Avatar",
+            candidate_group=None,
+            fallback_group=None,
+        )
+        self.assertEqual(name, "Avatar")
+        self.assertEqual(group, "Uncategorized")
 
 
 if __name__ == "__main__":

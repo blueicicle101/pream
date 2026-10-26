@@ -178,7 +178,9 @@ def trigger_refresh_all():
 
 @router.post("/cancel-refresh")
 def trigger_cancel_refresh():
-    """Cancel all running and pending source refresh and scanning operations immediately."""
+    """Cancel all running and pending source refresh and scanning operations immediately (including TMDB enrichment)."""
+    from app.services.tmdb import request_tmdb_cancellation
+    request_tmdb_cancellation()
     result = cancel_all_refreshes()
     return result
 

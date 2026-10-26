@@ -142,6 +142,13 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
             "series_count": ser,
         })
 
+    # TMDB Enrichment metrics: enriched vs total VOD & Series
+    enriched_movies_count = db.query(Movie).filter(Movie.tmdb_id != None, Movie.is_hidden == False).count()
+    enriched_series_count = db.query(Series).filter(Series.tmdb_id != None, Series.is_hidden == False).count()
+    total_vod_and_series = movie_count + series_count
+    total_enriched_count = enriched_movies_count + enriched_series_count
+    enrichment_percentage = round((total_enriched_count / max(1, total_vod_and_series)) * 100, 1) if total_vod_and_series > 0 else 0
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -157,6 +164,11 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
             "total_series": total_series,
             "total_all_streams": total_all_streams,
             "potential_failovers_count": potential_failovers_count,
+            "enriched_movies_count": enriched_movies_count,
+            "enriched_series_count": enriched_series_count,
+            "total_enriched_count": total_enriched_count,
+            "total_vod_and_series": total_vod_and_series,
+            "enrichment_percentage": enrichment_percentage,
             "first_login": first_login,
             "recent_stream_logs": recent_stream_logs,
             "server_name": settings.SERVER_NAME,
@@ -326,9 +338,13 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
 
     # Get runtime settings from DB
     from app.services.tmdb import is_tmdb_enabled, get_tmdb_rate_limit, is_tmdb_auto_group_enabled
+    from app.services.gemini import get_gemini_api_key, is_staggered_gemini_calls_enabled, get_gemini_rate_delay
     tmdb_enabled = is_tmdb_enabled(db)
     tmdb_auto_group = is_tmdb_auto_group_enabled(db)
     tmdb_rate_limit = get_tmdb_rate_limit(db)
+    gemini_api_key = get_gemini_api_key(db)
+    staggered_gemini_calls = is_staggered_gemini_calls_enabled(db)
+    gemini_rate_delay = get_gemini_rate_delay(db)
 
     tmdb_key_setting = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
     tmdb_api_key = tmdb_key_setting.value if tmdb_key_setting else settings.TMDB_API_KEY
@@ -359,6 +375,9 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "tmdb_auto_group": tmdb_auto_group,
             "tmdb_rate_limit": tmdb_rate_limit,
             "tmdb_api_key": tmdb_api_key,
+            "gemini_api_key": gemini_api_key,
+            "staggered_gemini_calls": staggered_gemini_calls,
+            "gemini_rate_delay": gemini_rate_delay,
             "telegram_bot_token": telegram_bot_token,
             "telegram_chat_id": telegram_chat_id,
             "refresh_cron": refresh_cron,
@@ -387,6 +406,9 @@ def update_settings(
     tmdb_auto_group: Optional[str] = Form(None),
     tmdb_rate_limit: Optional[str] = Form("0.05"),
     tmdb_api_key: Optional[str] = Form(""),
+    gemini_api_key: Optional[str] = Form(""),
+    staggered_gemini_calls: Optional[str] = Form(None),
+    gemini_rate_delay: Optional[str] = Form("4.0"),
     telegram_bot_token: Optional[str] = Form(""),
     telegram_chat_id: Optional[str] = Form(""),
     refresh_cron: Optional[str] = Form("0 4 * * *"),
@@ -400,10 +422,15 @@ def update_settings(
     hist_val = "true" if stream_history else "false"
     tmdb_en_val = "true" if tmdb_enabled else "false"
     tmdb_ag_val = "true" if tmdb_auto_group else "false"
+    gemini_stag_val = "true" if staggered_gemini_calls else "false"
     try:
         tmdb_rl_val = str(max(0.0, float(tmdb_rate_limit or 0.05)))
     except ValueError:
         tmdb_rl_val = "0.05"
+    try:
+        gemini_rd_val = str(max(0.5, float(gemini_rate_delay or 4.0)))
+    except ValueError:
+        gemini_rd_val = "4.0"
     try:
         sh_count = str(max(1, min(5, int(stream_health_count or 4))))
     except ValueError:
@@ -419,6 +446,9 @@ def update_settings(
         ("tmdb_auto_group", tmdb_ag_val),
         ("tmdb_rate_limit", tmdb_rl_val),
         ("tmdb_api_key", (tmdb_api_key or "").strip()),
+        ("gemini_api_key", (gemini_api_key or "").strip()),
+        ("staggered_gemini_calls", gemini_stag_val),
+        ("gemini_rate_delay", gemini_rd_val),
         ("telegram_bot_token", (telegram_bot_token or "").strip()),
         ("telegram_chat_id", (telegram_chat_id or "").strip()),
         ("refresh_cron", (refresh_cron or "0 4 * * *").strip()),

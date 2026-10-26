@@ -14,6 +14,8 @@ from app.services.tmdb import (
     enrich_single_movie,
     enrich_single_series,
     get_tmdb_api_key,
+    register_active_tmdb_task,
+    request_tmdb_cancellation,
     search_tmdb_candidates,
 )
 
@@ -30,6 +32,11 @@ async def trigger_tmdb_enrich(
     db: Session = Depends(get_db),
 ):
     """Trigger metadata enrichment for pending movies and TV series (optionally scoped to group or content_type)."""
+    import asyncio
+    current_task = asyncio.current_task()
+    if current_task:
+        register_active_tmdb_task(current_task)
+
     result = await enrich_pending_media(
         db,
         batch_size=batch_size,
@@ -39,6 +46,13 @@ async def trigger_tmdb_enrich(
         content_type=content_type,
     )
     return result
+
+
+@router.post("/cancel")
+def trigger_cancel_tmdb():
+    """Cancel running TMDB enrichment operations immediately."""
+    request_tmdb_cancellation()
+    return {"status": "ok", "message": "TMDB enrichment cancellation requested"}
 
 
 @router.post("/enrich/movie/{movie_id}")
