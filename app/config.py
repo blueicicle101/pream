@@ -21,26 +21,18 @@ class Settings(BaseSettings):
     TMDB_API_KEY: str = ""
     TMDB_RATE_LIMIT: float = 0.05  # Delay in seconds between TMDB API requests (20 req/s safe)
 
-    # ── Gemini AI Title Extraction ──
-    GEMINI_API_KEY: str = ""
-    STAGGERED_GEMINI_CALLS: bool = True  # Stagger Gemini calls to stay safely within free/tier rate limits (15 RPM)
-    GEMINI_RATE_DELAY: float = 4.0  # Seconds between staggered Gemini API calls (15 req/min = 4s)
-
-    # ── Telegram Notifications ──
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
-
     # ── Database ──
     DATABASE_URL: str = "sqlite:///./data/pream.db"
 
     # ── Scheduler ──
+    REFRESH_CRON_ENABLED: bool = True  # Master switch for automated cron schedule
     REFRESH_CRON: str = "0 4 * * *"  # 4 AM daily
 
     # ── Global Source-Prefix Grouping ──
     GROUP_BY_SOURCE: bool = False  # Prefix all groups with source name
 
     # ── Source Scanning & Ingestion ──
-    SOURCE_SCAN_THREADS: int = 2
+    SOURCE_SCAN_THREADS: int = 1  # Concurrency for source ingestion (min: 1, max: 2)
     SOURCE_TIMEOUT: float = 60.0  # Timeout in seconds to abort slow or stuck source scans
 
     # ── Stream Health & Auto Re-prioritization ──
@@ -50,6 +42,17 @@ class Settings(BaseSettings):
     # ── Stream Failover & History (Zero-Bandwidth) ──
     STREAM_FAILOVER: bool = True  # Automatically 302-redirect to alternate healthy source if primary fails
     STREAM_HISTORY: bool = True  # Log playback history (IP, media, timestamp) with 30-day retention
+
+    # ── Telegram Notifications ──
+    TELEGRAM_ENABLED: bool = True  # Master switch for telegram notifications
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+
+    # ── Gemini AI Title Extraction ──
+    GEMINI_ENABLED: bool = True  # Master switch for Gemini AI title & language extraction
+    GEMINI_API_KEY: str = ""
+    STAGGERED_GEMINI_CALLS: bool = True  # Stagger Gemini calls to stay safely within free/tier rate limits (15 RPM)
+    GEMINI_RATE_DELAY: float = 4.0  # Seconds between staggered Gemini API calls (15 req/min = 4s)
 
     # ── Server ──
     HOST: str = "0.0.0.0"

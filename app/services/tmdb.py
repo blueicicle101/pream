@@ -4,6 +4,7 @@ Cleans titles, searches TMDB API, fetches posters, plots, ratings, genres,
 and optionally reorganizes movies/series into '<LANG> | <GENRE>' display groups.
 """
 import asyncio
+import difflib
 import logging
 import re
 import unicodedata
@@ -21,6 +22,7 @@ from app.services.gemini import (
     extract_title_with_gemini,
     get_gemini_api_key,
     get_gemini_rate_delay,
+    is_gemini_enabled,
     is_staggered_gemini_calls_enabled,
 )
 from app.services.task_status import set_task_status
@@ -274,6 +276,80 @@ def get_tmdb_api_key(db: Session) -> str:
     return settings.TMDB_API_KEY.strip()
 
 
+def select_best_tmdb_candidate(
+    query_title: str,
+    target_year: Optional[int],
+    results: List[Dict[str, Any]],
+    is_tv: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """
+    Select the most accurate candidate from TMDB results by prioritizing:
+    1. Release year matching within ±1 year (prevents "$Positions" 2026 matching "21 Positions" 2023).
+       If target_year is provided and year-matching candidates exist, candidates with mismatched years (>1 diff) are excluded.
+    2. Exact title match (query equals title or original_title).
+    3. String similarity ratio between query and candidate title/original_title.
+    """
+    if not results:
+        return None
+
+    norm_query = query_title.strip().lower()
+    # Also strip non-alphanumeric for a normalized comparison (e.g. "$positions" -> "positions")
+    norm_query_alphanum = re.sub(r"[^\w\s]", "", norm_query).strip()
+
+    valid_candidates = []
+    for item in results:
+        date_str = item.get("first_air_date" if is_tv else "release_date") or ""
+        cand_year = None
+        if len(date_str) >= 4 and date_str[:4].isdigit():
+            cand_year = int(date_str[:4])
+
+        item_title = (item.get("name" if is_tv else "title") or "").strip().lower()
+        orig_title = (item.get("original_name" if is_tv else "original_title") or "").strip().lower()
+
+        # Compute title similarity
+        score_title = difflib.SequenceMatcher(None, norm_query, item_title).ratio()
+        score_orig = difflib.SequenceMatcher(None, norm_query, orig_title).ratio()
+        best_sim = max(score_title, score_orig)
+
+        # Bonus for exact or alphanum-exact match
+        if item_title == norm_query or orig_title == norm_query:
+            best_sim += 0.5
+        elif item_title == norm_query_alphanum or orig_title == norm_query_alphanum:
+            best_sim += 0.4
+        elif item_title.startswith(norm_query) or orig_title.startswith(norm_query):
+            best_sim += 0.2
+
+        year_diff = None
+        if target_year and cand_year:
+            year_diff = abs(target_year - cand_year)
+
+        valid_candidates.append({
+            "item": item,
+            "year": cand_year,
+            "year_diff": year_diff,
+            "score": best_sim,
+            "popularity": float(item.get("popularity", 0.0) or 0.0),
+        })
+
+    # If target_year was provided, prefer candidates within ±1 year tolerance
+    if target_year:
+        year_matched = [c for c in valid_candidates if c["year_diff"] is not None and c["year_diff"] <= 1]
+        if year_matched:
+            # Sort by score desc, then popularity desc
+            year_matched.sort(key=lambda x: (x["score"], x["popularity"]), reverse=True)
+            return year_matched[0]["item"]
+        # If no candidates matched the year, check if the top candidate has high exact title match
+        exact_title_matches = [c for c in valid_candidates if c["score"] >= 1.4]
+        if exact_title_matches:
+            exact_title_matches.sort(key=lambda x: (x["score"], x["popularity"]), reverse=True)
+            return exact_title_matches[0]["item"]
+        return None
+
+    # No target_year provided: sort by score desc, then popularity desc
+    valid_candidates.sort(key=lambda x: (x["score"], x["popularity"]), reverse=True)
+    return valid_candidates[0]["item"]
+
+
 async def search_movie_tmdb(
     title: str,
     year: Optional[int],
@@ -300,7 +376,7 @@ async def search_movie_tmdb(
                 if return_all:
                     return results
                 if results:
-                    return results[0]
+                    return select_best_tmdb_candidate(title, year, results, is_tv=False)
     except Exception as e:
         logger.warning(f"TMDB movie search failed for '{title}': {e}")
     return [] if return_all else None
@@ -332,7 +408,7 @@ async def search_tv_tmdb(
                 if return_all:
                     return results
                 if results:
-                    return results[0]
+                    return select_best_tmdb_candidate(title, year, results, is_tv=True)
     except Exception as e:
         logger.warning(f"TMDB TV search failed for '{title}': {e}")
     return [] if return_all else None
@@ -348,7 +424,7 @@ async def enrich_movie(movie: Movie, api_key: str, db: Optional[Session] = None)
 
     ai_lang_code = None
     # If regex search yields no match and Gemini API key is available, attempt AI extraction
-    gemini_key = get_gemini_api_key(db)
+    gemini_key = get_gemini_api_key(db) if is_gemini_enabled(db) else None
     if not result and gemini_key:
         stagger = is_staggered_gemini_calls_enabled(db)
         delay = get_gemini_rate_delay(db)
@@ -432,7 +508,7 @@ async def enrich_series(series: Series, api_key: str, db: Optional[Session] = No
     result = await search_tv_tmdb(clean_title, year or series.year, api_key)
 
     ai_lang_code = None
-    gemini_key = get_gemini_api_key(db)
+    gemini_key = get_gemini_api_key(db) if is_gemini_enabled(db) else None
     if not result and gemini_key:
         stagger = is_staggered_gemini_calls_enabled(db)
         delay = get_gemini_rate_delay(db)

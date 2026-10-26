@@ -338,13 +338,20 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
 
     # Get runtime settings from DB
     from app.services.tmdb import is_tmdb_enabled, get_tmdb_rate_limit, is_tmdb_auto_group_enabled
-    from app.services.gemini import get_gemini_api_key, is_staggered_gemini_calls_enabled, get_gemini_rate_delay
+    from app.services.gemini import get_gemini_api_key, is_staggered_gemini_calls_enabled, get_gemini_rate_delay, is_gemini_enabled
+    from app.services.notifications import is_telegram_enabled
+    from app.services.ingestion.manager import get_source_scan_threads
+    from app.scheduler.scheduler import is_refresh_cron_enabled
     tmdb_enabled = is_tmdb_enabled(db)
     tmdb_auto_group = is_tmdb_auto_group_enabled(db)
     tmdb_rate_limit = get_tmdb_rate_limit(db)
+    gemini_enabled = is_gemini_enabled(db)
     gemini_api_key = get_gemini_api_key(db)
     staggered_gemini_calls = is_staggered_gemini_calls_enabled(db)
     gemini_rate_delay = get_gemini_rate_delay(db)
+    telegram_enabled = is_telegram_enabled(db)
+    refresh_cron_enabled = is_refresh_cron_enabled()
+    source_scan_threads = get_source_scan_threads(db)
 
     tmdb_key_setting = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
     tmdb_api_key = tmdb_key_setting.value if tmdb_key_setting else settings.TMDB_API_KEY
@@ -380,6 +387,10 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "gemini_rate_delay": gemini_rate_delay,
             "telegram_bot_token": telegram_bot_token,
             "telegram_chat_id": telegram_chat_id,
+            "telegram_enabled": telegram_enabled,
+            "gemini_enabled": gemini_enabled,
+            "refresh_cron_enabled": refresh_cron_enabled,
+            "source_scan_threads": source_scan_threads,
             "refresh_cron": refresh_cron,
             "stream_health": stream_health_enabled,
             "stream_health_count": stream_health_count,
@@ -398,6 +409,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
 def update_settings(
     request: Request,
     group_by_source: Optional[str] = Form(None),
+    source_scan_threads: Optional[str] = Form("1"),
     stream_health: Optional[str] = Form(None),
     stream_health_count: Optional[str] = Form("4"),
     stream_failover: Optional[str] = Form(None),
@@ -406,23 +418,33 @@ def update_settings(
     tmdb_auto_group: Optional[str] = Form(None),
     tmdb_rate_limit: Optional[str] = Form("0.05"),
     tmdb_api_key: Optional[str] = Form(""),
+    gemini_enabled: Optional[str] = Form(None),
     gemini_api_key: Optional[str] = Form(""),
     staggered_gemini_calls: Optional[str] = Form(None),
     gemini_rate_delay: Optional[str] = Form("4.0"),
+    telegram_enabled: Optional[str] = Form(None),
     telegram_bot_token: Optional[str] = Form(""),
     telegram_chat_id: Optional[str] = Form(""),
+    refresh_cron_enabled: Optional[str] = Form(None),
     refresh_cron: Optional[str] = Form("0 4 * * *"),
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ):
     """Save runtime settings to SQLite."""
     gbs_val = "true" if group_by_source else "false"
+    cron_en_val = "true" if refresh_cron_enabled else "false"
+    tg_en_val = "true" if telegram_enabled else "false"
+    gem_en_val = "true" if gemini_enabled else "false"
     sh_val = "true" if stream_health else "false"
     sf_val = "true" if stream_failover else "false"
     hist_val = "true" if stream_history else "false"
     tmdb_en_val = "true" if tmdb_enabled else "false"
     tmdb_ag_val = "true" if tmdb_auto_group else "false"
     gemini_stag_val = "true" if staggered_gemini_calls else "false"
+    try:
+        sst_val = str(max(1, min(2, int(source_scan_threads or 1))))
+    except ValueError:
+        sst_val = "1"
     try:
         tmdb_rl_val = str(max(0.0, float(tmdb_rate_limit or 0.05)))
     except ValueError:
@@ -438,6 +460,10 @@ def update_settings(
 
     pairs = [
         ("group_by_source", gbs_val),
+        ("source_scan_threads", sst_val),
+        ("refresh_cron_enabled", cron_en_val),
+        ("telegram_enabled", tg_en_val),
+        ("gemini_enabled", gem_en_val),
         ("stream_health", sh_val),
         ("stream_health_count", sh_count),
         ("stream_failover", sf_val),

@@ -57,12 +57,12 @@ class BugfixFeaturesTestCase(unittest.TestCase):
                 pass
 
     def test_01_source_scan_threads_setting(self):
-        """Test SOURCE_SCAN_THREADS has default 2 and can be configured."""
+        """Test SOURCE_SCAN_THREADS has default 1 and can be configured."""
         settings = Settings()
-        self.assertEqual(settings.SOURCE_SCAN_THREADS, 2)
+        self.assertEqual(settings.SOURCE_SCAN_THREADS, 1)
 
-        custom_settings = Settings(SOURCE_SCAN_THREADS=4)
-        self.assertEqual(custom_settings.SOURCE_SCAN_THREADS, 4)
+        custom_settings = Settings(SOURCE_SCAN_THREADS=2)
+        self.assertEqual(custom_settings.SOURCE_SCAN_THREADS, 2)
 
     def test_02_task_status_tracker_and_idle_transition(self):
         """Test set_task_status and get_task_status transitions."""

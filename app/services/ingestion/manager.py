@@ -44,11 +44,28 @@ _cancel_requested: bool = False
 _cancel_lock = threading.Lock()
 
 
+def get_source_scan_threads(db: Optional[Session] = None) -> int:
+    """Get active scan threads count (default: 1, max: 2)."""
+    if db:
+        db_setting = db.query(Setting).filter(Setting.key == "source_scan_threads").first()
+        if db_setting and db_setting.value:
+            try:
+                val = int(db_setting.value)
+                return max(1, min(2, val))
+            except ValueError:
+                pass
+    return max(1, min(2, getattr(settings, "SOURCE_SCAN_THREADS", 1)))
+
+
 def get_scan_executor() -> concurrent.futures.ThreadPoolExecutor:
     """Get or create bounded ThreadPoolExecutor for background source scanning."""
     global _scan_executor
     if _scan_executor is None:
-        workers = max(1, getattr(settings, "SOURCE_SCAN_THREADS", 2))
+        db = SessionLocal()
+        try:
+            workers = get_source_scan_threads(db)
+        finally:
+            db.close()
         _scan_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="PreamScanWorker",
@@ -442,7 +459,7 @@ async def refresh_all_sources(db: Optional[Session] = None) -> List[Dict[str, An
 
     import time
     start_time = time.time()
-    scan_threads = max(1, getattr(settings, "SOURCE_SCAN_THREADS", 2))
+    scan_threads = get_source_scan_threads()
     if is_cancel_requested():
         logger.info("refresh_all_sources aborted before execution (cancellation requested).")
         clear_all_workers()

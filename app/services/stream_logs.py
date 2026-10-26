@@ -65,7 +65,7 @@ def record_stream_log(
 
         # Opportunistic cleanup (approx 1 in 20 requests) to keep table within 30 days
         # Skip random opportunistic check during unit tests (STREAM_HEALTH_COUNT or specific test DB)
-        if random.random() < 0.05 and not str(db.bind.url).endswith("test_features.db"):
+        if random.random() < 0.05 and "test" not in str(db.bind.url):
             cleanup_old_stream_logs(db, days=30)
     except Exception as e:
         logger.warning(f"Failed to record stream log: {e}")

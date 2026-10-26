@@ -15,6 +15,15 @@ from app.models.setting import Setting
 logger = logging.getLogger(__name__)
 
 
+def is_telegram_enabled(db: Optional[Session] = None) -> bool:
+    """Check if Telegram notifications are enabled in settings."""
+    if db:
+        enabled_setting = db.query(Setting).filter(Setting.key == "telegram_enabled").first()
+        if enabled_setting and enabled_setting.value:
+            return enabled_setting.value.lower() in ("true", "1", "yes")
+    return getattr(settings, "TELEGRAM_ENABLED", True)
+
+
 def get_telegram_config(db: Optional[Session] = None) -> tuple[str, str]:
     """Retrieve Telegram bot token and chat ID from DB or config."""
     token = settings.TELEGRAM_BOT_TOKEN
@@ -39,6 +48,9 @@ async def send_telegram_message(
     chat_id: Optional[str] = None,
 ) -> bool:
     """Send an HTML-formatted message via Telegram Bot API."""
+    if not is_telegram_enabled(db):
+        logger.debug("Telegram notifications are disabled.")
+        return False
     if not bot_token or not chat_id:
         token, cid = get_telegram_config(db)
         bot_token = bot_token or token

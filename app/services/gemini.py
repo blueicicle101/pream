@@ -20,6 +20,15 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
+def is_gemini_enabled(db: Optional[Session] = None) -> bool:
+    """Check if Gemini AI parsing is enabled."""
+    if db:
+        db_setting = db.query(Setting).filter(Setting.key == "gemini_enabled").first()
+        if db_setting and db_setting.value:
+            return db_setting.value.lower() in ("true", "1", "yes")
+    return getattr(settings, "GEMINI_ENABLED", True)
+
+
 def get_gemini_api_key(db: Optional[Session] = None) -> str:
     """Retrieve Gemini API key from database setting or .env."""
     if db:
@@ -62,6 +71,7 @@ async def extract_title_with_gemini(
     api_key: Optional[str] = None,
     stagger: bool = True,
     delay_seconds: float = 4.0,
+    db: Optional[Session] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Call Gemini Flash-Lite to extract clean title, release year, language ISO code,
@@ -75,7 +85,10 @@ async def extract_title_with_gemini(
         "tmdb_language": "fr-FR"
     }
     """
-    key = api_key or getattr(settings, "GEMINI_API_KEY", "").strip()
+    if not is_gemini_enabled(db):
+        return None
+
+    key = api_key or get_gemini_api_key(db)
     if not key:
         return None
 
