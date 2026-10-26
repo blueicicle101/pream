@@ -325,6 +325,11 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     group_by_source = is_group_by_source_enabled(db)
 
     # Get runtime settings from DB
+    from app.services.tmdb import is_tmdb_enabled, get_tmdb_rate_limit, is_tmdb_auto_group_enabled
+    tmdb_enabled = is_tmdb_enabled(db)
+    tmdb_auto_group = is_tmdb_auto_group_enabled(db)
+    tmdb_rate_limit = get_tmdb_rate_limit(db)
+
     tmdb_key_setting = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
     tmdb_api_key = tmdb_key_setting.value if tmdb_key_setting else settings.TMDB_API_KEY
 
@@ -350,6 +355,9 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
         context={
             "active_page": "settings",
             "group_by_source": group_by_source,
+            "tmdb_enabled": tmdb_enabled,
+            "tmdb_auto_group": tmdb_auto_group,
+            "tmdb_rate_limit": tmdb_rate_limit,
             "tmdb_api_key": tmdb_api_key,
             "telegram_bot_token": telegram_bot_token,
             "telegram_chat_id": telegram_chat_id,
@@ -375,6 +383,9 @@ def update_settings(
     stream_health_count: Optional[str] = Form("4"),
     stream_failover: Optional[str] = Form(None),
     stream_history: Optional[str] = Form(None),
+    tmdb_enabled: Optional[str] = Form(None),
+    tmdb_auto_group: Optional[str] = Form(None),
+    tmdb_rate_limit: Optional[str] = Form("0.05"),
     tmdb_api_key: Optional[str] = Form(""),
     telegram_bot_token: Optional[str] = Form(""),
     telegram_chat_id: Optional[str] = Form(""),
@@ -387,6 +398,12 @@ def update_settings(
     sh_val = "true" if stream_health else "false"
     sf_val = "true" if stream_failover else "false"
     hist_val = "true" if stream_history else "false"
+    tmdb_en_val = "true" if tmdb_enabled else "false"
+    tmdb_ag_val = "true" if tmdb_auto_group else "false"
+    try:
+        tmdb_rl_val = str(max(0.0, float(tmdb_rate_limit or 0.05)))
+    except ValueError:
+        tmdb_rl_val = "0.05"
     try:
         sh_count = str(max(1, min(5, int(stream_health_count or 4))))
     except ValueError:
@@ -398,6 +415,9 @@ def update_settings(
         ("stream_health_count", sh_count),
         ("stream_failover", sf_val),
         ("stream_history", hist_val),
+        ("tmdb_enabled", tmdb_en_val),
+        ("tmdb_auto_group", tmdb_ag_val),
+        ("tmdb_rate_limit", tmdb_rl_val),
         ("tmdb_api_key", (tmdb_api_key or "").strip()),
         ("telegram_bot_token", (telegram_bot_token or "").strip()),
         ("telegram_chat_id", (telegram_chat_id or "").strip()),

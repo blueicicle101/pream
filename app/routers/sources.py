@@ -24,6 +24,7 @@ from app.schemas.source import (
 )
 from app.services.auth import require_admin
 from app.services.ingestion.manager import (
+    cancel_all_refreshes,
     refresh_all_sources,
     refresh_source,
     run_refresh_all_background,
@@ -173,6 +174,13 @@ def trigger_refresh_all():
         "status": "started",
         "message": "Parallel refresh for all enabled sources started in background",
     }
+
+
+@router.post("/cancel-refresh")
+def trigger_cancel_refresh():
+    """Cancel all running and pending source refresh and scanning operations immediately."""
+    result = cancel_all_refreshes()
+    return result
 
 
 @router.post("/health-check")

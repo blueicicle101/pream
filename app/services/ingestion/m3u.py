@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.config import settings
 from app.models.source import Source
 from app.services.ingestion.user_agents import get_user_agent
 from app.services.ingestion.xtream import IngestResult, parse_content_types
@@ -140,7 +141,8 @@ async def fetch_m3u(source: Source) -> IngestResult:
         "User-Agent": ua,
         "Accept": "*/*",
     }
-    timeout = httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0)
+    src_timeout = getattr(settings, "SOURCE_TIMEOUT", 60.0) or 60.0
+    timeout = httpx.Timeout(connect=min(15.0, src_timeout), read=src_timeout, write=15.0, pool=15.0)
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=timeout, follow_redirects=True) as client:
@@ -163,10 +165,10 @@ async def fetch_m3u(source: Source) -> IngestResult:
 
             return parse_m3u_content(resp.text, source.id, content_types)
 
-    except httpx.ConnectTimeout as e:
+    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
         result.status = "error"
-        result.error_reason = "connection_error"
-        result.error_message = f"Connection timed out: {str(e)}"
+        result.error_reason = "timeout"
+        result.error_message = f"Request timed out ({src_timeout}s): {str(e)}"
         return result
     except httpx.ConnectError as e:
         result.status = "error"

@@ -117,23 +117,38 @@
             </div>
         </div>
 
-        <!-- Active Filter Indicator -->
-        {% if current_group or q %}
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span class="text-secondary fs-7">Active Filters:</span>
-            {% if current_group %}
-            <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
-                <i class="fa-regular fa-folder"></i> {{ current_group }}
-                <a href="/library?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear category filter">&times;</a>
-            </span>
+        <!-- Active Filter Indicator & Scoped Actions -->
+        {% if current_group or q or tab in ('vod', 'series') %}
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                {% if current_group or q %}
+                <span class="text-secondary fs-7">Active Filters:</span>
+                {% if current_group %}
+                <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
+                    <i class="fa-regular fa-folder"></i> {{ current_group }}
+                    <a href="/library?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear category filter">&times;</a>
+                </span>
+                {% endif %}
+                {% if q %}
+                <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
+                    <i class="fa-solid fa-magnifying-glass"></i> "{{ q }}"
+                    <a href="/library?tab={{ tab }}{% if current_group %}&group={{ current_group|urlencode }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear search">&times;</a>
+                </span>
+                {% endif %}
+                <a href="/library?tab={{ tab }}" class="btn btn-link btn-sm text-secondary p-0 ms-2 fs-8 text-decoration-none">Reset all</a>
+                {% endif %}
+            </div>
+
+            <!-- Scoped Category Enrichment Action -->
+            {% if tab in ('vod', 'series') and current_group %}
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-success fw-semibold shadow-xs" 
+                        onclick="enrichCurrentGroup('{{ current_group|escape }}', '{{ tab }}', this)"
+                        title="Enrich all pending movies/series in this category with TMDB metadata">
+                    <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Enrich Category via TMDB
+                </button>
+            </div>
             {% endif %}
-            {% if q %}
-            <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
-                <i class="fa-solid fa-magnifying-glass"></i> "{{ q }}"
-                <a href="/library?tab={{ tab }}{% if current_group %}&group={{ current_group|urlencode }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear search">&times;</a>
-            </span>
-            {% endif %}
-            <a href="/library?tab={{ tab }}" class="btn btn-link btn-sm text-secondary p-0 ms-2 fs-8 text-decoration-none">Reset all</a>
         </div>
         {% endif %}
 
@@ -158,12 +173,25 @@
                 <div class="card h-100 media-card shadow-sm position-relative overflow-hidden" 
                      title="Raw: {{ item.raw_name }} | Group: {{ item.raw_group }}">
                     
-                    <!-- Source Badge Overlay -->
-                    {% if src %}
-                    <span class="position-absolute top-0 start-0 m-2 badge bg-dark bg-opacity-75 text-white rounded-pill fs-9 z-2">
-                        {{ src.name }}
-                    </span>
-                    {% endif %}
+                    <!-- Top Badges Overlay -->
+                    <div class="position-absolute top-0 start-0 m-2 d-flex flex-column gap-1 z-2">
+                        {% if src %}
+                        <span class="badge bg-dark bg-opacity-75 text-white rounded-pill fs-9 shadow-xs">
+                            {{ src.name }}
+                        </span>
+                        {% endif %}
+                        {% if tab in ('vod', 'series') %}
+                            {% if item.tmdb_id %}
+                            <span class="badge bg-success bg-opacity-90 text-white rounded-pill fs-9 shadow-xs d-flex align-items-center gap-1" title="Enriched via TMDB (ID: {{ item.tmdb_id }})">
+                                <i class="fa-solid fa-check fs-10"></i> TMDB
+                            </span>
+                            {% else %}
+                            <span class="badge bg-secondary bg-opacity-75 text-white rounded-pill fs-9 shadow-xs" title="Not yet enriched">
+                                Raw
+                            </span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
 
                     <!-- Floating Action Button (Top Right) -->
                     {% if tab == 'live' %}
@@ -226,10 +254,24 @@
 
                         {% if tab in ('vod', 'series') %}
                         <div class="d-flex justify-content-between align-items-center fs-8 text-muted pt-1 border-top">
-                            <span>{{ item.year or '' }}</span>
-                            {% if item.rating %}
-                            <span class="text-warning-emphasis fw-bold"><i class="fa-solid fa-star me-1 text-warning fs-9"></i>{{ "%.1f"|format(item.rating) }}</span>
-                            {% endif %}
+                            <div class="d-flex align-items-center gap-1">
+                                <span>{{ item.year or '' }}</span>
+                                {% if item.rating %}
+                                <span class="text-warning-emphasis fw-bold ms-1"><i class="fa-solid fa-star me-1 text-warning fs-9"></i>{{ "%.1f"|format(item.rating) }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-link btn-xs p-0 text-secondary hover-primary" 
+                                        onclick="openTmdbMatchModal('{{ tab }}', {{ item.id }}, '{{ item.display_name|escape }}', '{{ item.year or '' }}')" 
+                                        title="Manually search & match on TMDB">
+                                    <i class="fa-solid fa-magnifying-glass fs-9"></i>
+                                </button>
+                                <button type="button" class="btn btn-link btn-xs p-0 text-secondary hover-primary" 
+                                        onclick="enrichSingleItem('{{ tab }}', {{ item.id }}, this)" 
+                                        title="Auto-enrich TMDB metadata for this title">
+                                    <i class="fa-solid fa-wand-magic-sparkles fs-9"></i>
+                                </button>
+                            </div>
                         </div>
                         {% endif %}
                     </div>
@@ -302,6 +344,82 @@
             </div>
             <div class="modal-footer border-top">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual TMDB Match Search Modal -->
+<div class="modal fade" id="tmdbManualMatchModal" tabindex="-1" aria-labelledby="tmdbManualMatchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow border">
+            <div class="modal-header border-bottom">
+                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="tmdbManualMatchModalLabel">
+                    <i class="fa-solid fa-wand-magic-sparkles text-primary"></i> Match with TMDB
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <input type="hidden" id="manualMatchMediaType" value="vod">
+                <input type="hidden" id="manualMatchItemId" value="">
+
+                <!-- Search Query Filters -->
+                <form id="tmdbManualSearchForm" onsubmit="event.preventDefault(); triggerManualTmdbSearch();" class="row g-2 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fs-8 fw-semibold mb-1">Title / Query</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="fa-solid fa-film text-secondary"></i></span>
+                            <input type="text" class="form-control" id="manualMatchQuery" placeholder="e.g. Avatar, Breaking Bad" required>
+                        </div>
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label fs-8 fw-semibold mb-1">Release Year</label>
+                        <input type="number" class="form-control form-control-sm" id="manualMatchYear" placeholder="e.g. 2009" min="1900" max="2099">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label fs-8 fw-semibold mb-1">Language</label>
+                        <select class="form-select form-select-sm" id="manualMatchLanguage">
+                            <option value="">Default (en-US)</option>
+                            <option value="en-US">English (en-US)</option>
+                            <option value="es-ES">Spanish (es-ES)</option>
+                            <option value="fr-FR">French (fr-FR)</option>
+                            <option value="de-DE">German (de-DE)</option>
+                            <option value="it-IT">Italian (it-IT)</option>
+                            <option value="nl-NL">Dutch (nl-NL)</option>
+                            <option value="pt-PT">Portuguese (pt-PT)</option>
+                            <option value="ru-RU">Russian (ru-RU)</option>
+                            <option value="tr-TR">Turkish (tr-TR)</option>
+                            <option value="ar-SA">Arabic (ar-SA)</option>
+                            <option value="hi-IN">Hindi (hi-IN)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="submit" class="btn btn-sm btn-primary w-100 fw-semibold" id="manualMatchSearchBtn">
+                            <i class="fa-solid fa-magnifying-glass me-1"></i> Search
+                        </button>
+                    </div>
+                </form>
+
+                <hr class="my-3">
+
+                <!-- Loading State -->
+                <div id="manualMatchSpinner" class="text-center py-4 d-none">
+                    <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                    <div class="text-muted fs-8">Searching TMDB catalog...</div>
+                </div>
+
+                <!-- Empty / Instruction State -->
+                <div id="manualMatchEmptyState" class="text-center py-4 text-muted">
+                    <i class="fa-solid fa-magnifying-glass-arrow-right fs-2 mb-2 text-secondary opacity-50"></i>
+                    <p class="fs-7 mb-0">Enter a title above and click Search to browse TMDB matches.</p>
+                </div>
+
+                <!-- Results Container -->
+                <div id="manualMatchResults" class="row row-cols-1 row-cols-md-2 g-3 d-none">
+                </div>
+            </div>
+            <div class="modal-footer border-top">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
             </div>
         </div>
     </div>

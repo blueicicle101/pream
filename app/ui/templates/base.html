@@ -165,6 +165,9 @@
                         <span id="footerProgressPercent" class="text-primary fs-8 fw-semibold">0%</span>
                     </div>
                     <div id="footerMultiWorkers" class="d-none align-items-center gap-2 flex-wrap"></div>
+                    <button type="button" class="btn btn-outline-danger btn-xs py-0 px-2 fs-9 rounded-pill fw-semibold ms-1" id="footerCancelBtn" onclick="triggerCancelAll(this)" title="Cancel all active scans">
+                        <i class="fa-solid fa-stop me-1"></i> Cancel
+                    </button>
                 </div>
                 <span class="badge bg-light text-secondary border fs-8" id="footerServerInfo">
                     <i class="fa-solid fa-server me-1"></i> {{ server_name }}

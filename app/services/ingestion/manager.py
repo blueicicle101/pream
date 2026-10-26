@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 _scan_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
 _db_write_lock = threading.Lock()
-
+_active_futures: List[concurrent.futures.Future] = []
+_active_tasks: List[asyncio.Task] = []
+_cancel_requested: bool = False
+_cancel_lock = threading.Lock()
 
 
 def get_scan_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -53,16 +56,77 @@ def get_scan_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _scan_executor
 
 
+def is_cancel_requested() -> bool:
+    """Check if cancellation has been requested for current refreshes."""
+    global _cancel_requested
+    with _cancel_lock:
+        return _cancel_requested
+
+
+def cancel_all_refreshes() -> Dict[str, Any]:
+    """
+    Cancel all active background source scanning and refresh operations immediately.
+    Cancels queued futures and running asyncio tasks, clears active progress workers,
+    and sets task status back to idle/cancelled.
+    """
+    global _scan_executor, _cancel_requested, _active_futures, _active_tasks
+    cancelled_count = 0
+
+    with _cancel_lock:
+        _cancel_requested = True
+
+        # 1. Cancel queued/running thread futures
+        for fut in list(_active_futures):
+            if not fut.done():
+                if fut.cancel():
+                    cancelled_count += 1
+        _active_futures.clear()
+
+        # 2. Cancel running asyncio tasks
+        for task in list(_active_tasks):
+            if not task.done():
+                task.cancel()
+                cancelled_count += 1
+        _active_tasks.clear()
+
+        # 3. Shutdown executor and recreate a clean one
+        if _scan_executor is not None:
+            try:
+                _scan_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as e:
+                logger.warning(f"Error shutting down scan executor: {e}")
+            _scan_executor = None
+
+    clear_all_workers()
+    set_task_status("idle", "Idle", "Source refresh operations cancelled by user", 0)
+    logger.info("All source refresh tasks cancelled by user.")
+
+    # Reset cancel flag for future jobs
+    with _cancel_lock:
+        _cancel_requested = False
+
+    return {
+        "status": "ok",
+        "message": "All active and queued source refreshes have been cancelled.",
+        "cancelled_count": cancelled_count,
+    }
+
+
 def run_refresh_source_background(source_id: int) -> None:
     """Execute refresh_source on an isolated worker thread without blocking the main event loop."""
     def _worker():
         try:
             asyncio.run(refresh_source(source_id))
+        except asyncio.CancelledError:
+            logger.info(f"Source refresh for source {source_id} cancelled.")
         except Exception as e:
             logger.exception(f"Background worker error refreshing source {source_id}: {e}")
 
     executor = get_scan_executor()
-    executor.submit(_worker)
+    fut = executor.submit(_worker)
+    with _cancel_lock:
+        _active_futures.append(fut)
+    fut.add_done_callback(lambda f: _active_futures.remove(f) if f in _active_futures else None)
 
 
 def run_refresh_all_background() -> None:
@@ -70,11 +134,16 @@ def run_refresh_all_background() -> None:
     def _worker():
         try:
             asyncio.run(refresh_all_sources())
+        except asyncio.CancelledError:
+            logger.info("All sources refresh cancelled.")
         except Exception as e:
             logger.exception(f"Background worker error refreshing all sources: {e}")
 
     executor = get_scan_executor()
-    executor.submit(_worker)
+    fut = executor.submit(_worker)
+    with _cancel_lock:
+        _active_futures.append(fut)
+    fut.add_done_callback(lambda f: _active_futures.remove(f) if f in _active_futures else None)
 
 
 def is_group_by_source_enabled(db: Session) -> bool:
@@ -107,6 +176,17 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
                 "error_message": f"Source {source_id} not found in database",
             }
 
+        if is_cancel_requested():
+            logger.info(f"Skipping refresh for source {source.name} (cancellation requested)")
+            return {
+                "source_id": source_id,
+                "source_name": source.name,
+                "status": "cancelled",
+                "error_reason": "cancelled",
+                "error_message": "Refresh cancelled by user",
+            }
+
+        logger.info(f"Starting refresh for source '{source.name}' (ID: {source.id}, Type: {source.type})...")
         update_worker_progress(str(source_id), source.name, "Connecting...", 15)
 
         # Fetch data based on source type
@@ -126,7 +206,20 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
 
         now = datetime.now(timezone.utc)
 
+        if is_cancel_requested():
+            logger.info(f"Aborting refresh for source '{source.name}' after fetch (cancellation requested)")
+            return {
+                "source_id": source.id,
+                "source_name": source.name,
+                "status": "cancelled",
+                "error_reason": "cancelled",
+                "error_message": "Refresh cancelled by user",
+            }
+
         if result.status != "ok":
+            logger.warning(
+                f"Source '{source.name}' refresh failed: {result.error_reason or 'error'} - {result.error_message or 'Unknown error'}"
+            )
             set_task_status(
                 "error",
                 "Error",
@@ -243,19 +336,40 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
             70,
         )
 
-        # Thread-safe SQLite atomic write
+        if is_cancel_requested():
+            logger.info(f"Aborting database write for source '{source.name}' (cancellation requested)")
+            return {
+                "source_id": source.id,
+                "source_name": source.name,
+                "status": "cancelled",
+                "error_reason": "cancelled",
+                "error_message": "Refresh cancelled by user",
+            }
+
+        logger.info(
+            f"Writing items to database for '{source.name}': {len(channels_to_insert)} channels, {len(movies_to_insert)} movies, {len(series_to_insert)} series..."
+        )
+
+        # Thread-safe SQLite atomic write in chunks to prevent SQLite lock starvation on low vCPU systems
+        CHUNK_SIZE = 1000
         with _db_write_lock:
             db.query(Channel).filter(Channel.source_id == source.id).delete()
             db.query(Movie).filter(Movie.source_id == source.id).delete()
             db.query(Episode).filter(Episode.source_id == source.id).delete()
             db.query(Series).filter(Series.source_id == source.id).delete()
+            db.commit()
 
-            if channels_to_insert:
-                db.bulk_save_objects(channels_to_insert)
-            if movies_to_insert:
-                db.bulk_save_objects(movies_to_insert)
-            if series_to_insert:
-                db.bulk_save_objects(series_to_insert)
+            for i in range(0, len(channels_to_insert), CHUNK_SIZE):
+                db.bulk_save_objects(channels_to_insert[i : i + CHUNK_SIZE])
+                db.commit()
+
+            for i in range(0, len(movies_to_insert), CHUNK_SIZE):
+                db.bulk_save_objects(movies_to_insert[i : i + CHUNK_SIZE])
+                db.commit()
+
+            for i in range(0, len(series_to_insert), CHUNK_SIZE):
+                db.bulk_save_objects(series_to_insert[i : i + CHUNK_SIZE])
+                db.commit()
 
             source.expiry_date = result.expiry_date
             source.max_connections = result.max_connections
@@ -265,6 +379,9 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
             db.commit()
 
         update_worker_progress(str(source_id), source.name, "Complete", 100)
+        logger.info(
+            f"Successfully refreshed source '{source.name}' in database: {len(channels_to_insert)} channels, {len(movies_to_insert)} movies, {len(series_to_insert)} series."
+        )
 
         return {
             "source_id": source.id,
@@ -326,6 +443,12 @@ async def refresh_all_sources(db: Optional[Session] = None) -> List[Dict[str, An
     import time
     start_time = time.time()
     scan_threads = max(1, getattr(settings, "SOURCE_SCAN_THREADS", 2))
+    if is_cancel_requested():
+        logger.info("refresh_all_sources aborted before execution (cancellation requested).")
+        clear_all_workers()
+        return []
+
+    logger.info(f"Starting parallel refresh for {len(source_ids)} enabled sources using {scan_threads} worker threads...")
     set_task_status("running", "Scanning Sources", f"Scanning {len(source_ids)} sources ({scan_threads} workers)...", 20)
 
     # Throttle concurrency to SOURCE_SCAN_THREADS
@@ -333,10 +456,22 @@ async def refresh_all_sources(db: Optional[Session] = None) -> List[Dict[str, An
 
     async def _bounded_refresh(sid: int):
         async with sem:
+            if is_cancel_requested():
+                return {
+                    "source_id": sid,
+                    "status": "cancelled",
+                    "error_reason": "cancelled",
+                    "error_message": "Refresh cancelled by user",
+                }
             return await refresh_source(sid)
 
     tasks = [_bounded_refresh(sid) for sid in source_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    if is_cancel_requested():
+        logger.info("refresh_all_sources aborted during execution (cancellation requested).")
+        clear_all_workers()
+        return []
 
     formatted_results = []
     for sid, res in zip(source_ids, results):

@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     OUTPUT_PASSWORD: str = "pream"
 
     # ── TMDB ──
+    TMDB_ENABLED: bool = True  # Master switch to toggle TMDB enrichment
+    TMDB_AUTO_GROUP: bool = True  # Auto-reorganize enriched titles into '<LANG> | <GENRE>' groups
     TMDB_API_KEY: str = ""
+    TMDB_RATE_LIMIT: float = 0.05  # Delay in seconds between TMDB API requests (20 req/s safe)
 
     # ── Telegram Notifications ──
     TELEGRAM_BOT_TOKEN: str = ""
@@ -31,8 +34,9 @@ class Settings(BaseSettings):
     # ── Global Source-Prefix Grouping ──
     GROUP_BY_SOURCE: bool = False  # Prefix all groups with source name
 
-    # ── Source Scanning Concurrency ──
+    # ── Source Scanning & Ingestion ──
     SOURCE_SCAN_THREADS: int = 2
+    SOURCE_TIMEOUT: float = 60.0  # Timeout in seconds to abort slow or stuck source scans
 
     # ── Stream Health & Auto Re-prioritization ──
     STREAM_HEALTH: bool = True

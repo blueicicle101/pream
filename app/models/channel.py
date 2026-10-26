@@ -18,12 +18,12 @@ class Channel(Base):
     raw_group = Column(Text, nullable=True)
 
     # Display fields — computed by rules engine
-    display_name = Column(Text, nullable=False)
-    display_group = Column(Text, nullable=True)
+    display_name = Column(Text, nullable=False, index=True)
+    display_group = Column(Text, nullable=True, index=True)
 
     logo_url = Column(Text, nullable=True)
     epg_channel_id = Column(String(255), nullable=True)
-    is_hidden = Column(Boolean, nullable=False, default=False)
+    is_hidden = Column(Boolean, nullable=False, default=False, index=True)
     stream_url = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

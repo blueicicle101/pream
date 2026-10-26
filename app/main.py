@@ -1,10 +1,19 @@
 """
 Pream — FastAPI Application Entry Point.
 """
+import logging
 import os
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
+
+# Configure root logger with standard timestamp formatting
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("pream")
 
 # Ensure parent directory (project root) is on sys.path if invoked directly
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -43,13 +52,13 @@ async def lifespan(app: FastAPI):
     # Start background scheduler
     start_scheduler()
 
-    print(f"[STARTED] {settings.SERVER_NAME} on {settings.HOST}:{settings.PORT}")
+    logger.info(f"Started {settings.SERVER_NAME} on {settings.HOST}:{settings.PORT}")
 
     yield
 
     # ── Shutdown ──
     stop_scheduler()
-    print(f"[STOPPED] {settings.SERVER_NAME} shutting down")
+    logger.info(f"{settings.SERVER_NAME} shutting down")
 
 
 app = FastAPI(

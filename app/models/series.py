@@ -18,8 +18,8 @@ class Series(Base):
     raw_group = Column(Text, nullable=True)
 
     # Display fields — computed by rules engine
-    display_name = Column(Text, nullable=False)
-    display_group = Column(Text, nullable=True)  # e.g. "EN | Drama"
+    display_name = Column(Text, nullable=False, index=True)
+    display_group = Column(Text, nullable=True, index=True)  # e.g. "EN | Drama"
 
     # TMDB metadata
     year = Column(Integer, nullable=True)
@@ -29,8 +29,8 @@ class Series(Base):
     genre = Column(Text, nullable=True)  # Comma-separated
     rating = Column(Float, nullable=True)
 
-    is_hidden = Column(Boolean, nullable=False, default=False)
-    tmdb_fetched_at = Column(DateTime, nullable=True)
+    is_hidden = Column(Boolean, nullable=False, default=False, index=True)
+    tmdb_fetched_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):

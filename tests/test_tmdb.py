@@ -13,11 +13,13 @@ from app.models.movie import Movie
 from app.models.series import Series
 from app.models.source import Source
 from app.services.tmdb import (
+    apply_tmdb_id_match,
     clean_media_title,
     detect_language_code,
     enrich_movie,
     enrich_pending_media,
     enrich_series,
+    search_tmdb_candidates,
 )
 
 test_engine = create_engine("sqlite:///./data/test_tmdb.db", connect_args={"check_same_thread": False})
@@ -105,6 +107,7 @@ class TMDBEnrichmentTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
 
         self.assertEqual(movie.tmdb_id, 98)
+        self.assertEqual(movie.display_name, "Gladiator")
         self.assertEqual(movie.poster_url, "https://image.tmdb.org/t/p/w500/gladiator_poster.jpg")
         self.assertEqual(movie.year, 2000)
         self.assertEqual(movie.rating, 8.5)
@@ -112,6 +115,7 @@ class TMDBEnrichmentTestCase(unittest.IsolatedAsyncioTestCase):
         # Regrouped into "<LANG> | <GENRE>"
         self.assertEqual(movie.display_group, "UK | Action")
         # Raw fields intact
+        self.assertEqual(movie.raw_name, "Gladiator.2000.1080p")
         self.assertEqual(movie.raw_group, "UK | Movies")
         self.assertIsNotNone(movie.tmdb_fetched_at)
 
@@ -157,6 +161,71 @@ class TMDBEnrichmentTestCase(unittest.IsolatedAsyncioTestCase):
             res = await enrich_pending_media(self.db)
             self.assertEqual(res["status"], "ok")
             self.assertEqual(res["movies_enriched"], 1)
+
+    @patch("app.services.tmdb.httpx.AsyncClient")
+    async def test_04_search_candidates_and_apply_match(self, mock_client_cls):
+        """Test searching candidates and manually applying a TMDB ID match."""
+        mock_client = AsyncMock()
+        mock_resp = AsyncMock()
+        mock_resp.status_code = 200
+        mock_resp.json = lambda: {
+            "results": [
+                {
+                    "id": 19995,
+                    "title": "Avatar",
+                    "original_title": "Avatar",
+                    "release_date": "2009-12-15",
+                    "poster_path": "/avatar.jpg",
+                    "vote_average": 7.6,
+                    "overview": "In the 22nd century...",
+                }
+            ]
+        }
+        mock_client.get.return_value = mock_resp
+        mock_client.__aenter__.return_value = mock_client
+        mock_client_cls.return_value = mock_client
+
+        # 1. Search candidates
+        candidates = await search_tmdb_candidates("Avatar", media_type="movie", api_key="test_key")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["id"], 19995)
+        self.assertEqual(candidates[0]["title"], "Avatar")
+        self.assertEqual(candidates[0]["year"], "2009")
+
+        # 2. Apply match
+        movie = Movie(
+            source_id=self.source.id,
+            raw_name="Avatar.2009.Extended.Cut.1080p",
+            display_name="Avatar.2009.Extended.Cut.1080p",
+            raw_group="FR | Movies",
+            display_group="FR | Movies",
+        )
+        self.db.add(movie)
+        self.db.commit()
+
+        # Mock detail call
+        mock_detail_resp = AsyncMock()
+        mock_detail_resp.status_code = 200
+        mock_detail_resp.json = lambda: {
+            "id": 19995,
+            "title": "Avatar",
+            "poster_path": "/avatar_official.jpg",
+            "overview": "In the 22nd century...",
+            "vote_average": 7.6,
+            "release_date": "2009-12-15",
+            "genres": [{"id": 28, "name": "Action"}, {"id": 12, "name": "Adventure"}],
+        }
+        mock_client.get.return_value = mock_detail_resp
+
+        with patch("app.services.tmdb.get_tmdb_api_key", return_value="test_key"):
+            match_res = await apply_tmdb_id_match("movie", movie.id, 19995, self.db)
+            self.assertEqual(match_res["status"], "ok")
+            self.assertEqual(match_res["title"], "Avatar")
+            self.assertEqual(movie.display_name, "Avatar")
+            self.assertEqual(movie.year, 2009)
+            self.assertEqual(movie.display_group, "FR | Action")
+            self.assertEqual(movie.raw_name, "Avatar.2009.Extended.Cut.1080p")
+            self.assertEqual(movie.raw_group, "FR | Movies")
 
 
 if __name__ == "__main__":

@@ -35,9 +35,12 @@
                             Trigger an immediate background refresh of all configured and enabled IPTV sources, applying active transformation rules upon completion.
                         </p>
                     </div>
-                    <div>
+                    <div class="d-flex flex-wrap gap-2">
                         <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" id="btnRefreshAllSettings" onclick="triggerRefreshAll(this)">
                             <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh All Sources
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm fw-semibold" id="btnCancelAllRefreshes" onclick="triggerCancelAll(this)">
+                            <i class="fa-solid fa-stop me-1"></i> Cancel All Refreshes
                         </button>
                     </div>
                 </div>
@@ -213,10 +216,14 @@
         <div class="col-12 col-lg-6">
             <!-- TMDB Integration -->
             <div class="card shadow-sm border mb-4">
-                <div class="card-header bg-white border-bottom py-3">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
                         <i class="fa-solid fa-film text-success"></i> TMDB API Integration
                     </h5>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="tmdbEnabled" name="tmdb_enabled" {% if tmdb_enabled %}checked{% endif %}>
+                        <label class="form-check-label fs-8 fw-semibold" for="tmdbEnabled">Enabled</label>
+                    </div>
                 </div>
                 <div class="card-body">
                     <p class="fs-7 text-secondary mb-3">
@@ -228,7 +235,17 @@
                             placeholder="Enter TMDB API Key">
                         <div class="form-text text-muted">Get a free key from <a
                                 href="https://www.themoviedb.org/settings/api" target="_blank"
-                                class="text-primary">themoviedb.org</a>.</div>
+                                class="text-primary">themoviedb.org</a>. Automatically skipped if left blank or disabled.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">Rate Limit Delay (seconds)</label>
+                        <input type="number" step="0.01" min="0" max="2.0" class="form-control form-control-sm font-monospace" name="tmdb_rate_limit" value="{{ tmdb_rate_limit }}">
+                        <div class="form-text text-muted">Delay between consecutive TMDB requests (default: <code>0.05s</code> = up to 20 req/sec, safely within TMDB's 40 req/sec rate limit).</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="tmdbAutoGroup" name="tmdb_auto_group" {% if tmdb_auto_group %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark fs-7" for="tmdbAutoGroup">Auto-organize Enriched Media by Language & Genre</label>
+                        <div class="form-text text-muted">When enabled, enriched movies and series are grouped into clean <code>&lt;LANG&gt; | &lt;GENRE&gt;</code> categories (e.g. <code>EN | Comedy</code>, <code>UK | Drama</code>).</div>
                     </div>
                 </div>
             </div>

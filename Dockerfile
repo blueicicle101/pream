@@ -21,13 +21,14 @@ RUN mkdir -p /app/data
 # Environment defaults
 ENV HOST=0.0.0.0 \
     PORT=8000 \
+    SOURCE_TIMEOUT=60.0 \
     DATABASE_URL=sqlite:///./data/pream.db
 
 EXPOSE 8000
 
-# Docker healthcheck querying /health
+# Docker healthcheck querying /health (respects dynamic PORT env var)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Launch FastAPI with uvicorn (exec ensures PID 1 receives SIGTERM/SIGINT)
 CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000}"]

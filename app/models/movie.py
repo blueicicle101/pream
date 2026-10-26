@@ -18,8 +18,8 @@ class Movie(Base):
     raw_group = Column(Text, nullable=True)
 
     # Display fields — computed by rules engine
-    display_name = Column(Text, nullable=False)
-    display_group = Column(Text, nullable=True)  # e.g. "EN | Action"
+    display_name = Column(Text, nullable=False, index=True)
+    display_group = Column(Text, nullable=True, index=True)  # e.g. "EN | Action"
 
     # TMDB metadata
     year = Column(Integer, nullable=True)
@@ -31,9 +31,9 @@ class Movie(Base):
     rating = Column(Float, nullable=True)
 
     container_ext = Column(String(20), nullable=True)  # mp4, mkv, etc.
-    is_hidden = Column(Boolean, nullable=False, default=False)
+    is_hidden = Column(Boolean, nullable=False, default=False, index=True)
     stream_url = Column(Text, nullable=True)
-    tmdb_fetched_at = Column(DateTime, nullable=True)
+    tmdb_fetched_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     def __repr__(self):

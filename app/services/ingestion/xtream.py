@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.config import settings
 from app.models.source import Source
 from app.services.ingestion.user_agents import get_user_agent
 
@@ -75,8 +76,9 @@ async def fetch_xtream(source: Source) -> IngestResult:
         "Accept": "*/*",
     }
 
-    # Timeouts: 15s connect, 90s read for large playlists
-    timeout = httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0)
+    # Timeouts: user-configurable via SOURCE_TIMEOUT
+    src_timeout = getattr(settings, "SOURCE_TIMEOUT", 60.0) or 60.0
+    timeout = httpx.Timeout(connect=min(15.0, src_timeout), read=src_timeout, write=15.0, pool=15.0)
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=timeout, follow_redirects=True) as client:
@@ -276,10 +278,10 @@ async def fetch_xtream(source: Source) -> IngestResult:
         result.status = "ok"
         return result
 
-    except httpx.ConnectTimeout as e:
+    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
         result.status = "error"
-        result.error_reason = "connection_error"
-        result.error_message = f"Connection timed out: {str(e)}"
+        result.error_reason = "timeout"
+        result.error_message = f"Request timed out ({src_timeout}s): {str(e)}"
         return result
     except httpx.ConnectError as e:
         result.status = "error"

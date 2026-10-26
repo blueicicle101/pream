@@ -69,6 +69,27 @@ def _migrate_sqlite_schema(target_engine=None):
                     conn.execute(text("ALTER TABLE sources ADD COLUMN expiry_date TEXT"))
                 if "max_connections" not in source_cols:
                     conn.execute(text("ALTER TABLE sources ADD COLUMN max_connections TEXT"))
+
+            # Create performance indices for high-frequency search and grouping queries
+            indices_to_create = [
+                ("idx_channels_display_group", "channels", "display_group"),
+                ("idx_channels_display_name", "channels", "display_name"),
+                ("idx_channels_is_hidden", "channels", "is_hidden"),
+                ("idx_movies_display_group", "movies", "display_group"),
+                ("idx_movies_display_name", "movies", "display_name"),
+                ("idx_movies_is_hidden", "movies", "is_hidden"),
+                ("idx_movies_tmdb_fetched_at", "movies", "tmdb_fetched_at"),
+                ("idx_series_display_group", "series", "display_group"),
+                ("idx_series_display_name", "series", "display_name"),
+                ("idx_series_is_hidden", "series", "is_hidden"),
+                ("idx_series_tmdb_fetched_at", "series", "tmdb_fetched_at"),
+            ]
+            for idx_name, tbl, col in indices_to_create:
+                if tbl in table_names:
+                    try:
+                        conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({col})"))
+                    except Exception:
+                        pass
     except Exception:
         pass
 

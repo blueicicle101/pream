@@ -714,6 +714,33 @@ async function triggerRefreshAll(btn) {
     }
 }
 
+async function triggerCancelAll(btn) {
+    if (!confirm('Are you sure you want to cancel all running and queued source refreshes?')) return;
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Cancelling...';
+    }
+
+    try {
+        const resp = await fetch('/api/sources/cancel-refresh', { method: 'POST' });
+        const res = await resp.json();
+        if (res.status === 'ok') {
+            showToast(res.message || 'All refreshes cancelled');
+            updateFooterTaskProgress();
+        } else {
+            showToast(`Error: ${res.error_message || res.detail || 'Failed to cancel refreshes'}`, true);
+        }
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+}
+
 function showErrorModal(sourceName, errorMsg) {
     const titleEl = document.getElementById('errorSourceTitle');
     const contentEl = document.getElementById('errorSourceContent');
@@ -1229,13 +1256,14 @@ async function triggerEnrichTMDB(btn) {
     updateFooterTaskProgress();
 
     try {
-        const resp = await fetch('/api/tmdb/enrich?batch_size=50', { method: 'POST' });
+        const resp = await fetch('/api/tmdb/enrich?batch_size=100&continuous=true', { method: 'POST' });
         const res = await resp.json();
         updateFooterTaskProgress();
         if (res.status === 'ok') {
-            showToast(`TMDB enrichment completed: ${res.movies_enriched} movies, ${res.series_enriched} series updated.`);
+            const remainingTxt = res.catalog_remaining > 0 ? ` (${res.catalog_remaining} remaining)` : ' (All media enriched!)';
+            showToast(`TMDB enrichment completed: ${res.movies_enriched} movies, ${res.series_enriched} series updated${remainingTxt}.`);
         } else {
-            showToast(`TMDB enrichment skipped: ${res.reason || 'Check API key'}`, true);
+            showToast(`TMDB enrichment skipped: ${res.reason || 'Check API key or settings'}`, true);
         }
     } catch (err) {
         showToast(err.message, true);
@@ -1243,6 +1271,242 @@ async function triggerEnrichTMDB(btn) {
         btn.innerHTML = originalHtml;
         btn.disabled = false;
         updateFooterTaskProgress();
+    }
+}
+
+async function enrichCurrentGroup(groupName, contentType, btn) {
+    if (!confirm(`Enrich all pending ${contentType === 'series' ? 'series' : 'movies'} in "${groupName}" via TMDB?`)) return;
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Enriching Category...';
+    }
+    updateFooterTaskProgress();
+
+    try {
+        const resp = await fetch(`/api/tmdb/enrich?group=${encodeURIComponent(groupName)}&content_type=${encodeURIComponent(contentType)}&batch_size=100`, { method: 'POST' });
+        const res = await resp.json();
+        updateFooterTaskProgress();
+        if (res.status === 'ok') {
+            showToast(`Category enriched! ${res.movies_enriched || res.series_enriched || 0} items updated.`);
+            setTimeout(() => window.location.reload(), 1200);
+        } else {
+            showToast(`Enrichment skipped: ${res.reason || 'Error'}`, true);
+        }
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+}
+
+async function enrichSingleItem(contentType, itemId, btn) {
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+
+    try {
+        const endpoint = contentType === 'series' ? `/api/tmdb/enrich/series/${itemId}` : `/api/tmdb/enrich/movie/${itemId}`;
+        const resp = await fetch(endpoint, { method: 'POST' });
+        const res = await resp.json();
+        if (res.status === 'ok') {
+            showToast(`Enriched "${res.title}" via TMDB!`);
+            setTimeout(() => window.location.reload(), 800);
+        } else if (res.status === 'not_found') {
+            showToast(`No automatic match for "${res.title}". Opening search...`);
+            openTmdbMatchModal(contentType, itemId, res.title, '');
+        } else {
+            showToast(`Enrichment skipped: ${res.reason || 'Check settings'}`, true);
+        }
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+}
+
+// ----------------------------------------------------
+// TMDB Manual Match Modal Functions
+// ----------------------------------------------------
+
+function openTmdbMatchModal(contentType, itemId, initialQuery = '', initialYear = '') {
+    const modalEl = document.getElementById('tmdbManualMatchModal');
+    if (!modalEl) return;
+
+    // Set form fields
+    const mediaTypeInput = document.getElementById('manualMatchMediaType');
+    const itemIdInput = document.getElementById('manualMatchItemId');
+    const queryInput = document.getElementById('manualMatchQuery');
+    const yearInput = document.getElementById('manualMatchYear');
+
+    if (mediaTypeInput) mediaTypeInput.value = contentType;
+    if (itemIdInput) itemIdInput.value = itemId;
+    if (queryInput) queryInput.value = initialQuery;
+    if (yearInput) yearInput.value = initialYear;
+
+    // Reset results and empty state
+    const resultsContainer = document.getElementById('manualMatchResults');
+    const emptyState = document.getElementById('manualMatchEmptyState');
+    const spinner = document.getElementById('manualMatchSpinner');
+
+    if (resultsContainer) {
+        resultsContainer.innerHTML = '';
+        resultsContainer.classList.add('d-none');
+    }
+    if (spinner) spinner.classList.add('d-none');
+    if (emptyState) emptyState.classList.remove('d-none');
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    // If query provided, run search automatically
+    if (initialQuery) {
+        triggerManualTmdbSearch();
+    }
+}
+
+async function triggerManualTmdbSearch() {
+    const mediaType = document.getElementById('manualMatchMediaType')?.value || 'vod';
+    const query = document.getElementById('manualMatchQuery')?.value.trim();
+    const year = document.getElementById('manualMatchYear')?.value.trim();
+    const language = document.getElementById('manualMatchLanguage')?.value;
+    const searchBtn = document.getElementById('manualMatchSearchBtn');
+
+    if (!query) return;
+
+    const spinner = document.getElementById('manualMatchSpinner');
+    const emptyState = document.getElementById('manualMatchEmptyState');
+    const resultsContainer = document.getElementById('manualMatchResults');
+
+    if (spinner) spinner.classList.remove('d-none');
+    if (emptyState) emptyState.classList.add('d-none');
+    if (resultsContainer) {
+        resultsContainer.classList.add('d-none');
+        resultsContainer.innerHTML = '';
+    }
+    if (searchBtn) searchBtn.disabled = true;
+
+    try {
+        let url = `/api/tmdb/search?query=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`;
+        if (year) url += `&year=${encodeURIComponent(year)}`;
+        if (language) url += `&language=${encodeURIComponent(language)}`;
+
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to search TMDB');
+        }
+        const data = await resp.json();
+        const results = data.results || [];
+
+        if (results.length === 0) {
+            if (emptyState) {
+                emptyState.innerHTML = `
+                    <i class="fa-solid fa-face-frown fs-2 mb-2 text-secondary opacity-50"></i>
+                    <p class="fs-7 mb-0">No matches found for "${escapeHtml(query)}". Try another title or language.</p>
+                `;
+                emptyState.classList.remove('d-none');
+            }
+            return;
+        }
+
+        let html = '';
+        const currentItemId = document.getElementById('manualMatchItemId')?.value;
+
+        for (const item of results) {
+            const posterHtml = item.poster_url 
+                ? `<img src="${item.poster_url}" class="rounded shadow-xs" style="width: 60px; height: 90px; object-fit: cover;" alt="Poster">`
+                : `<div class="rounded bg-light border d-flex align-items-center justify-content-center text-muted" style="width: 60px; height: 90px;"><i class="fa-solid fa-film opacity-25"></i></div>`;
+
+            const ratingHtml = item.vote_average 
+                ? `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-9"><i class="fa-solid fa-star me-1 text-warning"></i>${item.vote_average.toFixed(1)}</span>`
+                : '';
+
+            const yearHtml = item.year ? `<span class="badge bg-light text-secondary border fs-9">${escapeHtml(item.year)}</span>` : '';
+            const overviewSnippet = item.overview ? escapeHtml(item.overview.substring(0, 110)) + (item.overview.length > 110 ? '...' : '') : '<span class="text-muted fst-italic">No plot summary available.</span>';
+
+            html += `
+            <div class="col">
+                <div class="card h-100 border shadow-xs p-2 d-flex flex-row gap-3 align-items-start">
+                    <div class="flex-shrink-0">
+                        ${posterHtml}
+                    </div>
+                    <div class="flex-grow-1 min-w-0 d-flex flex-column justify-content-between h-100">
+                        <div>
+                            <h6 class="fw-bold fs-7 mb-1 text-dark text-truncate" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h6>
+                            <div class="d-flex align-items-center gap-1 mb-1">
+                                ${yearHtml}
+                                ${ratingHtml}
+                            </div>
+                            <p class="fs-9 text-secondary mb-2 line-clamp-2">${overviewSnippet}</p>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary fw-semibold fs-8 align-self-start mt-auto"
+                                onclick="applyManualTmdbMatch('${mediaType}', '${currentItemId}', ${item.id}, this)">
+                            <i class="fa-solid fa-check me-1"></i> Apply Match
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        if (resultsContainer) {
+            resultsContainer.innerHTML = html;
+            resultsContainer.classList.remove('d-none');
+        }
+    } catch (err) {
+        showToast(err.message, true);
+        if (emptyState) {
+            emptyState.innerHTML = `<p class="fs-7 text-danger mb-0">${escapeHtml(err.message)}</p>`;
+            emptyState.classList.remove('d-none');
+        }
+    } finally {
+        if (spinner) spinner.classList.add('d-none');
+        if (searchBtn) searchBtn.disabled = false;
+    }
+}
+
+async function applyManualTmdbMatch(mediaType, itemId, tmdbId, btn) {
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Applying...';
+    }
+
+    const language = document.getElementById('manualMatchLanguage')?.value || '';
+
+    try {
+        let url = `/api/tmdb/apply-match/${encodeURIComponent(mediaType)}/${encodeURIComponent(itemId)}?tmdb_id=${tmdbId}`;
+        if (language) url += `&language=${encodeURIComponent(language)}`;
+
+        const resp = await fetch(url, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to apply TMDB match');
+        }
+        const data = await resp.json();
+        showToast(`Matched "${data.title}" successfully!`);
+
+        const modalEl = document.getElementById('tmdbManualMatchModal');
+        if (modalEl) {
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+        }
+
+        setTimeout(() => window.location.reload(), 800);
+    } catch (err) {
+        showToast(err.message, true);
+        if (btn) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
     }
 }
 

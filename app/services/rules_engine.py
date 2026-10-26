@@ -252,6 +252,9 @@ def apply_all_rules_to_library(db: Session) -> Dict[str, Any]:
     set_task_status("running", "Applying Rules", f"Processed {len(channels)} Live channels. Processing VOD...", 50)
 
     # 2. Process Movies (VOD)
+    from app.services.tmdb import is_tmdb_auto_group_enabled, GENRE_MAP, detect_language_code
+    auto_group_enabled = is_tmdb_auto_group_enabled(db)
+
     movies = db.query(Movie).all()
     hidden_movies = 0
     for mv in movies:
@@ -260,7 +263,13 @@ def apply_all_rules_to_library(db: Session) -> Dict[str, Any]:
             "vod", mv.raw_name, mv.raw_group, s_name, group_prefix, compiled_rules, rule_counters
         )
         mv.display_name = d_name
-        mv.display_group = d_grp
+        # If movie was enriched and auto-group is enabled and no explicit group rule altered it, preserve TMDB genre group
+        if auto_group_enabled and mv.genre and mv.tmdb_id:
+            first_genre = mv.genre.split(",")[0].strip()
+            lang = detect_language_code(mv.raw_group or d_grp)
+            mv.display_group = f"{lang} | {first_genre}"
+        else:
+            mv.display_group = d_grp
         mv.is_hidden = hid
         if hid:
             hidden_movies += 1
@@ -274,7 +283,12 @@ def apply_all_rules_to_library(db: Session) -> Dict[str, Any]:
             "series", sr.raw_name, sr.raw_group, s_name, group_prefix, compiled_rules, rule_counters
         )
         sr.display_name = d_name
-        sr.display_group = d_grp
+        if auto_group_enabled and sr.genre and sr.tmdb_id:
+            first_genre = sr.genre.split(",")[0].strip()
+            lang = detect_language_code(sr.raw_group or d_grp)
+            sr.display_group = f"{lang} | {first_genre}"
+        else:
+            sr.display_group = d_grp
         sr.is_hidden = hid
         if hid:
             hidden_series += 1
@@ -456,13 +470,21 @@ def apply_all_rules_for_source(source_id: int, db: Session) -> Dict[str, Any]:
         ch.display_group = d_grp
         ch.is_hidden = hid
 
+    from app.services.tmdb import is_tmdb_auto_group_enabled, detect_language_code
+    auto_group_enabled = is_tmdb_auto_group_enabled(db)
+
     movies = db.query(Movie).filter(Movie.source_id == source_id).all()
     for mv in movies:
         d_name, d_grp, hid = apply_rules_to_item_chain(
             "vod", mv.raw_name, mv.raw_group, s_name, group_prefix, compiled_rules
         )
         mv.display_name = d_name
-        mv.display_group = d_grp
+        if auto_group_enabled and mv.genre and mv.tmdb_id:
+            first_genre = mv.genre.split(",")[0].strip()
+            lang = detect_language_code(mv.raw_group or d_grp)
+            mv.display_group = f"{lang} | {first_genre}"
+        else:
+            mv.display_group = d_grp
         mv.is_hidden = hid
 
     series_list = db.query(Series).filter(Series.source_id == source_id).all()
@@ -471,7 +493,12 @@ def apply_all_rules_for_source(source_id: int, db: Session) -> Dict[str, Any]:
             "series", sr.raw_name, sr.raw_group, s_name, group_prefix, compiled_rules
         )
         sr.display_name = d_name
-        sr.display_group = d_grp
+        if auto_group_enabled and sr.genre and sr.tmdb_id:
+            first_genre = sr.genre.split(",")[0].strip()
+            lang = detect_language_code(sr.raw_group or d_grp)
+            sr.display_group = f"{lang} | {first_genre}"
+        else:
+            sr.display_group = d_grp
         sr.is_hidden = hid
 
     db.commit()

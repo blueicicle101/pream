@@ -43,7 +43,7 @@ def scheduled_tmdb_job():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            res = loop.run_until_complete(enrich_pending_media(db, batch_size=40))
+            res = loop.run_until_complete(enrich_pending_media(db, batch_size=100, continuous=False, max_items=200))
             logger.info(f"Scheduled TMDB job result: {res}")
         finally:
             loop.close()
