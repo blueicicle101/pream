@@ -128,6 +128,8 @@ def _migrate_sqlite_schema(target_engine=None):
                 ("idx_series_src_hidden", "series", "source_id, is_hidden"),
                 ("idx_movies_hidden_tmdb", "movies", "is_hidden, tmdb_id"),
                 ("idx_series_hidden_tmdb", "series", "is_hidden, tmdb_id"),
+                ("idx_activity_logs_created_at", "activity_logs", "created_at"),
+                ("idx_activity_logs_cat_status", "activity_logs", "category, status"),
             ]
             for idx_name, tbl, col in indices_to_create:
                 if tbl in table_names:

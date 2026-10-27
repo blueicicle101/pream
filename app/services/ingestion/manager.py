@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +21,7 @@ from app.models.rule import Rule
 from app.models.series import Episode, Series
 from app.models.setting import Setting
 from app.models.source import Source
+from app.services.activity_logs import log_activity
 from app.services.ingestion.m3u import fetch_m3u
 from app.services.ingestion.xtream import fetch_xtream
 from app.services.rules_engine import (
@@ -194,6 +196,7 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
         db = SessionLocal()
         should_close_db = True
 
+    t0_refresh = time.perf_counter()
     try:
         source = db.query(Source).filter(Source.id == source_id).first()
         if not source:
@@ -421,6 +424,18 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
             f"Successfully refreshed source '{source.name}' in database: {len(channels_to_insert)} channels, {len(movies_to_insert)} movies, {len(series_to_insert)} series."
         )
 
+        duration_ms = (time.perf_counter() - t0_refresh) * 1000.0
+        total_items = len(channels_to_insert) + len(movies_to_insert) + len(series_to_insert)
+        log_activity(
+            db,
+            category="refresh",
+            event=f"Source Refresh: {source.name}",
+            status="ok",
+            details=f"Ingested {len(channels_to_insert)} channels, {len(movies_to_insert)} movies, {len(series_to_insert)} series.",
+            duration_ms=duration_ms,
+            items_affected=total_items,
+        )
+
         return {
             "source_id": source.id,
             "source_name": source.name,
@@ -433,13 +448,25 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
     except Exception as e:
         db.rollback()
         logger.exception(f"Unhandled error refreshing source {source_id}: {e}")
+        duration_ms = (time.perf_counter() - t0_refresh) * 1000.0
+        src_name = f"Source {source_id}"
         try:
             src = db.query(Source).filter(Source.id == source_id).first()
             if src:
+                src_name = src.name
                 src.last_status = "error"
                 src.last_error = f"unhandled_error: {str(e)}"
                 src.last_refresh = datetime.now(timezone.utc)
                 db.commit()
+            log_activity(
+                db,
+                category="refresh",
+                event=f"Source Refresh: {src_name}",
+                status="error",
+                details=f"Failed with error: {str(e)}",
+                duration_ms=duration_ms,
+                items_affected=0,
+            )
         except Exception:
             pass
 

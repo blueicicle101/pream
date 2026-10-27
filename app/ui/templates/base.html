@@ -36,7 +36,7 @@
             <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
                 <span class="brand-icon"><i class="fa-solid fa-satellite-dish"></i></span>
                 <span class="tracking-wide text-white">PREAM</span>
-                <span class="badge bg-white text-primary rounded-pill fs-8 fw-bold">v0.3.5</span>
+                <span class="badge bg-white text-primary rounded-pill fs-8 fw-bold">v0.3.6</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#preamNavbar" aria-controls="preamNavbar" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
@@ -59,8 +59,18 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'search' %}active fw-bold text-white{% endif %}" href="/search">
+                            <i class="fa-solid fa-magnifying-glass me-1"></i> Search
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if active_page == 'rules' %}active fw-bold text-white{% endif %}" href="/rules">
                             <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Rules Engine
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'logs' %}active fw-bold text-white{% endif %}" href="/logs">
+                            <i class="fa-solid fa-clock-rotate-left me-1"></i> Logs
                         </a>
                     </li>
                     <li class="nav-item">
@@ -142,6 +152,55 @@
                         </a>
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" onclick="stopPlayer()">Close</button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Series Episodes Collection Modal (Global) -->
+    <div class="modal fade" id="seriesEpisodesModal" tabindex="-1" aria-labelledby="seriesEpisodesModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content shadow border">
+                <div class="modal-header border-bottom">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="seriesEpisodesModalLabel">
+                        <i class="fa-solid fa-clapperboard text-warning"></i> <span id="seriesModalTitle">Series Episodes</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4" id="seriesEpisodesModalBody">
+                    <div class="text-center py-5" id="seriesLoadingSpinner">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading episodes...</span>
+                        </div>
+                        <div class="text-muted mt-2 fs-7">Loading series episodes collection...</div>
+                    </div>
+                    
+                    <div id="seriesModalContent" class="d-none">
+                        <!-- Series Overview Banner -->
+                        <div class="row g-3 mb-4 align-items-center">
+                            <div class="col-auto">
+                                <img id="seriesModalPoster" src="" class="rounded shadow-sm" style="width: 90px; height: 130px; object-fit: cover;" alt="Poster" onerror="this.src='/static/img/placeholder_channel.png'">
+                            </div>
+                            <div class="col">
+                                <h5 id="seriesModalName" class="fw-bold text-dark mb-1"></h5>
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <span class="badge bg-light text-dark border" id="seriesModalYear"></span>
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" id="seriesModalRating"></span>
+                                    <span class="badge bg-light text-secondary border" id="seriesModalGenre"></span>
+                                </div>
+                                <p class="fs-8 text-secondary mb-0" id="seriesModalPlot"></p>
+                            </div>
+                        </div>
+
+                        <!-- Season Pills Navigation -->
+                        <ul class="nav nav-pills mb-3" id="seriesSeasonsTabs"></ul>
+
+                        <!-- Episodes Container -->
+                        <div id="seriesEpisodesList" class="d-flex flex-column gap-2"></div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>

@@ -552,3 +552,7 @@ pre {
 div.video-js[preload]{
         display: contents;
 }
+
+#streamPlayerModal{
+    z-index: 2000;
+}

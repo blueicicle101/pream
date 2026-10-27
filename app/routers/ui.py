@@ -19,6 +19,7 @@ from app.models.series import Episode, Series
 from app.models.setting import Setting
 from app.models.source import Source
 from app.models.stream_log import StreamLog
+from app.models.activity_log import ActivityLog
 from app.services.auth import (
     COOKIE_NAME,
     generate_session_token,
@@ -104,14 +105,6 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
     onboarding_setting = db.query(Setting).filter(Setting.key == "onboarding_completed").first()
     first_login = (onboarding_setting is None) and (len(sources) == 0)
 
-    # Recent stream history (last 10 playback requests)
-    recent_stream_logs = (
-        db.query(StreamLog)
-        .order_by(StreamLog.created_at.desc(), StreamLog.id.desc())
-        .limit(10)
-        .all()
-    )
-
     # Calculate per-source counts efficiently in 3 grouped queries (instead of 3*N queries)
     live_by_source = dict(
         db.query(Channel.source_id, func.count(Channel.id))
@@ -168,7 +161,6 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
             "total_vod_and_series": total_vod_and_series,
             "enrichment_percentage": enrichment_percentage,
             "first_login": first_login,
-            "recent_stream_logs": recent_stream_logs,
             "server_name": settings.SERVER_NAME,
         },
     )
@@ -296,6 +288,125 @@ def page_library(
             "server_name": settings.SERVER_NAME,
             "output_username": settings.OUTPUT_USERNAME,
             "output_password": settings.OUTPUT_PASSWORD,
+        },
+    )
+
+
+@router.get("/search", response_class=HTMLResponse)
+def page_search(
+    request: Request,
+    q: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    admin: str = Depends(require_admin),
+):
+    """Render unified Central Search page across Live TV, VOD Movies, and TV Series."""
+    clean_q = (q or "").strip()
+    channels = []
+    movies = []
+    series = []
+
+    if clean_q:
+        search_filter = f"%{clean_q}%"
+        channels = (
+            db.query(Channel)
+            .filter(Channel.is_hidden == False, Channel.display_name.ilike(search_filter))
+            .order_by(Channel.display_name.asc())
+            .limit(30)
+            .all()
+        )
+        movies = (
+            db.query(Movie)
+            .filter(Movie.is_hidden == False, Movie.display_name.ilike(search_filter))
+            .order_by(Movie.display_name.asc())
+            .limit(30)
+            .all()
+        )
+        series = (
+            db.query(Series)
+            .filter(Series.is_hidden == False, Series.display_name.ilike(search_filter))
+            .order_by(Series.display_name.asc())
+            .limit(30)
+            .all()
+        )
+
+    sources = db.query(Source).all()
+    source_map = {s.id: s for s in sources}
+
+    return templates.TemplateResponse(
+        request=request,
+        name="search.html",
+        context={
+            "active_page": "search",
+            "q": clean_q,
+            "channels": channels,
+            "movies": movies,
+            "series": series,
+            "source_map": source_map,
+            "server_name": settings.SERVER_NAME,
+            "output_username": settings.OUTPUT_USERNAME,
+            "output_password": settings.OUTPUT_PASSWORD,
+        },
+    )
+
+
+@router.get("/logs", response_class=HTMLResponse)
+def page_logs(
+    request: Request,
+    tab: str = Query("all", pattern="^(all|stream|refresh|tmdb)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=10, le=100),
+    db: Session = Depends(get_db),
+    admin: str = Depends(require_admin),
+):
+    """Render dedicated system and activity logs page."""
+    sources = db.query(Source).all()
+    source_map = {s.id: s for s in sources}
+
+    stream_logs = []
+    activity_logs = []
+
+    stream_total = db.query(StreamLog).count()
+    activity_total = db.query(ActivityLog).count()
+
+    offset = (page - 1) * page_size
+
+    if tab in ("all", "stream"):
+        stream_logs = (
+            db.query(StreamLog)
+            .order_by(StreamLog.created_at.desc(), StreamLog.id.desc())
+            .offset(offset if tab == "stream" else 0)
+            .limit(page_size if tab == "stream" else 25)
+            .all()
+        )
+
+    if tab in ("all", "refresh", "tmdb"):
+        act_query = db.query(ActivityLog)
+        if tab == "refresh":
+            act_query = act_query.filter(ActivityLog.category == "refresh")
+        elif tab == "tmdb":
+            act_query = act_query.filter(ActivityLog.category == "tmdb")
+
+        activity_logs = (
+            act_query.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .offset(offset if tab != "all" else 0)
+            .limit(page_size if tab != "all" else 25)
+            .all()
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="logs.html",
+        context={
+            "active_page": "logs",
+            "tab": tab,
+            "page": page,
+            "page_size": page_size,
+            "stream_logs": stream_logs,
+            "activity_logs": activity_logs,
+            "stream_total": stream_total,
+            "activity_total": activity_total,
+            "source_map": source_map,
+            "server_name": settings.SERVER_NAME,
         },
     )
 

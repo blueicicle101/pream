@@ -6,3 +6,4 @@ from app.models.series import Series, Episode  # noqa: F401
 from app.models.rule import Rule  # noqa: F401
 from app.models.setting import Setting  # noqa: F401
 from app.models.stream_log import StreamLog  # noqa: F401
+from app.models.activity_log import ActivityLog  # noqa: F401

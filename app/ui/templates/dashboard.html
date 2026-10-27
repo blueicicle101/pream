@@ -184,68 +184,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- Recent Stream Playback History Card -->
-        <div class="card shadow-sm border mt-4">
-            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3">
-                <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
-                    <i class="fa-solid fa-clock-rotate-left text-primary"></i> Stream Playback History
-                </h5>
-                <button class="btn btn-sm btn-outline-secondary fs-8 fw-semibold" onclick="openStreamLogsModal()">
-                    <i class="fa-solid fa-list me-1"></i> View Full 30-Day Log
-                </button>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0 align-middle">
-                        <thead class="table-light fs-8 text-uppercase">
-                            <tr>
-                                <th style="width: 15%;">Type</th>
-                                <th>Stream / Media Title</th>
-                                <th style="width: 22%;">Calling Client IP</th>
-                                <th style="width: 25%;" class="text-end">Timestamp</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% if not recent_stream_logs %}
-                            <tr>
-                                <td colspan="4" class="text-center py-4 text-muted fs-7">
-                                    <i class="fa-solid fa-play fs-4 mb-2 d-block opacity-50"></i>
-                                    No streams accessed yet. Client playback requests will appear here with caller IP and failover status.
-                                </td>
-                            </tr>
-                            {% else %}
-                            {% for l in recent_stream_logs %}
-                            <tr>
-                                <td>
-                                    {% if l.stream_type == 'movie' %}
-                                    <span class="badge bg-success-subtle text-success border border-success-subtle">VOD Movie</span>
-                                    {% elif l.stream_type == 'live' %}
-                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Live TV</span>
-                                    {% else %}
-                                    <span class="badge bg-info-subtle text-info border border-info-subtle">Series</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <span class="fw-semibold text-dark">{{ l.stream_title }}</span>
-                                    {% if l.is_failover %}
-                                    <span class="badge bg-warning-subtle text-warning border border-warning-subtle fs-9 ms-1" title="Redirected to secondary backup provider">Failover</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <code class="text-secondary bg-light px-2 py-1 rounded border fs-8">{{ l.client_ip }}</code>
-                                </td>
-                                <td class="text-end text-muted fs-8">
-                                    {{ l.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if l.created_at else '—' }}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                            {% endif %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Side Panel: Quick Actions & Output Gateway -->

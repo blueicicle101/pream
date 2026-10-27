@@ -25,6 +25,7 @@ from app.services.gemini import (
     is_gemini_enabled,
     is_staggered_gemini_calls_enabled,
 )
+from app.services.activity_logs import log_activity
 from app.services.task_status import set_task_status
 
 logger = logging.getLogger(__name__)
@@ -590,6 +591,7 @@ async def enrich_pending_media(
     Supports scoping to a specific category group and/or content_type.
     Respects rate limits by staggering calls and updates real-time task progress.
     """
+    t0_enrich = datetime.now(timezone.utc)
     if not is_tmdb_enabled(db):
         return {"status": "skipped", "reason": "TMDB enrichment is disabled in settings"}
 
@@ -763,6 +765,22 @@ async def enrich_pending_media(
     logger.info(f"TMDB enrichment finished: {msg}")
     set_task_status(status_code, status_title, msg, 100 if not was_cancelled else pct)
 
+    # Record operational activity log
+    try:
+        duration_ms = (datetime.now(timezone.utc) - t0_enrich).total_seconds() * 1000.0
+        scope_lbl = f"Group '{group}'" if group else "Full Catalog"
+        log_activity(
+            db,
+            category="tmdb",
+            event=f"TMDB Enrichment: {scope_lbl}",
+            status="cancelled" if was_cancelled else "ok",
+            details=msg,
+            duration_ms=duration_ms,
+            items_affected=total_movies_enriched + total_series_enriched,
+        )
+    except Exception:
+        pass
+
     return {
         "status": "cancelled" if was_cancelled else "ok",
         "movies_processed": total_movies_processed,
@@ -856,6 +874,7 @@ async def sync_duplicate_series(series: Series, db: Session) -> int:
 
 async def enrich_single_movie(movie_id: int, db: Session) -> Dict[str, Any]:
     """Enrich a single specific movie by its database ID."""
+    t0_enrich = datetime.now(timezone.utc)
     if not is_tmdb_enabled(db):
         return {"status": "skipped", "reason": "TMDB enrichment is disabled"}
     api_key = get_tmdb_api_key(db)
@@ -887,6 +906,7 @@ async def enrich_single_movie(movie_id: int, db: Session) -> Dict[str, Any]:
 
 async def enrich_single_series(series_id: int, db: Session) -> Dict[str, Any]:
     """Enrich a single specific TV series by its database ID."""
+    t0_enrich = datetime.now(timezone.utc)
     if not is_tmdb_enabled(db):
         return {"status": "skipped", "reason": "TMDB enrichment is disabled"}
     api_key = get_tmdb_api_key(db)

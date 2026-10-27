@@ -19,6 +19,8 @@ from app.models.source import Source
 from app.models.stream_log import StreamLog
 from app.services.auth import require_admin
 from app.services.backup import export_encrypted_backup, import_encrypted_backup
+from app.models.activity_log import ActivityLog
+from app.services.activity_logs import cleanup_old_activity_logs, log_activity
 from app.services.stream_logs import cleanup_old_stream_logs
 from app.services.task_status import get_task_status
 
@@ -135,8 +137,52 @@ def cleanup_stream_logs_endpoint(
     db: Session = Depends(get_db),
 ):
     """Manually trigger 30-day stream history log purge."""
-    deleted = cleanup_old_stream_logs(db, days=days)
-    return {"status": "ok", "deleted": deleted, "retention_days": days}
+    deleted_stream = cleanup_old_stream_logs(db, days=days)
+    deleted_activity = cleanup_old_activity_logs(db, days=days)
+    return {"status": "ok", "deleted_stream_logs": deleted_stream, "deleted_activity_logs": deleted_activity, "retention_days": days}
+
+
+# ── Operational Activity Logs (Source Refreshes & TMDB Enrichment) ──
+
+@router.get("/api/system/activity-logs")
+def get_activity_logs(
+    category: Optional[str] = Query(None, description="Filter by category: refresh, tmdb, system"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return operational activity logs with timing, item counts, and status."""
+    query = db.query(ActivityLog)
+    if category and category.strip():
+        query = query.filter(ActivityLog.category == category.strip().lower())
+
+    total = query.count()
+    logs = (
+        query.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "logs": [
+            {
+                "id": l.id,
+                "category": l.category,
+                "event": l.event,
+                "status": l.status,
+                "details": l.details,
+                "duration_ms": l.duration_ms,
+                "items_affected": l.items_affected,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
+    }
 
 
 # ── Settings Backup & Import (Encrypted JSON) ──

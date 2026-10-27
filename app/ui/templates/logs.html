@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block title %}Activity & System Logs — {{ server_name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+    <div>
+        <h3 class="fw-bold mb-1"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>Activity & System Logs</h3>
+        <p class="text-secondary mb-0">Track real-time playback requests, provider ingestion timings, and TMDB enrichment history (30-day retention).</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-danger btn-sm" onclick="purgeLogsModal()">
+            <i class="fa-solid fa-trash me-1"></i> Purge Logs
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+            <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Log Category Tabs -->
+<ul class="nav nav-pills mb-4 gap-2">
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'all' %}active fw-bold{% endif %}" href="/logs?tab=all">
+            <i class="fa-solid fa-layer-group me-1"></i> Overview & Recent
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'stream' %}active fw-bold{% endif %}" href="/logs?tab=stream">
+            <i class="fa-solid fa-play me-1"></i> Stream Playback Access
+            <span class="badge bg-primary rounded-pill ms-1">{{ stream_total }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'refresh' %}active fw-bold{% endif %}" href="/logs?tab=refresh">
+            <i class="fa-solid fa-server me-1"></i> Source Ingestions
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'tmdb' %}active fw-bold{% endif %}" href="/logs?tab=tmdb">
+            <i class="fa-solid fa-wand-magic-sparkles me-1"></i> TMDB Enrichments
+        </a>
+    </li>
+</ul>
+
+<!-- Stream Playback Access Logs Table -->
+{% if tab in ('all', 'stream') %}
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-play text-primary"></i> Stream Playback Access History
+            <span class="badge bg-light text-secondary border rounded-pill fs-8">{{ stream_total }} total</span>
+        </h5>
+        {% if tab == 'all' %}
+        <a href="/logs?tab=stream" class="btn btn-sm btn-outline-primary fs-8">View All Stream Logs</a>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light fs-8 text-uppercase">
+                    <tr>
+                        <th style="width: 12%;">Type</th>
+                        <th>Stream / Media Title</th>
+                        <th style="width: 20%;">Calling Client IP</th>
+                        <th style="width: 15%;">Source</th>
+                        <th style="width: 20%;" class="text-end">Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if not stream_logs %}
+                    <tr>
+                        <td colspan="5" class="text-center py-4 text-muted fs-7">
+                            <i class="fa-solid fa-play fs-4 mb-2 d-block opacity-50"></i>
+                            No playback requests recorded yet.
+                        </td>
+                    </tr>
+                    {% else %}
+                    {% for l in stream_logs %}
+                    {% set src = source_map.get(l.source_id) %}
+                    <tr>
+                        <td>
+                            {% if l.stream_type == 'movie' %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle">VOD Movie</span>
+                            {% elif l.stream_type == 'live' %}
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Live TV</span>
+                            {% else %}
+                            <span class="badge bg-info-subtle text-info border border-info-subtle">Series</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ l.stream_title }}</div>
+                            {% if l.is_failover %}
+                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle fs-9">Failover Redirect</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code class="text-secondary bg-light px-2 py-1 rounded border fs-8">{{ l.client_ip }}</code>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border fs-9">{{ src.name if src else (l.source_id or '—') }}</span>
+                        </td>
+                        <td class="text-end text-muted fs-8">
+                            {{ l.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if l.created_at else '—' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Operational Activity Logs (Source Refreshes & TMDB) Table -->
+{% if tab in ('all', 'refresh', 'tmdb') %}
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-server text-info"></i> 
+            {% if tab == 'refresh' %}Source Ingestion Logs{% elif tab == 'tmdb' %}TMDB Enrichment Logs{% else %}System Ingestion & Enrichment History{% endif %}
+            <span class="badge bg-light text-secondary border rounded-pill fs-8">{{ activity_total }} total</span>
+        </h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light fs-8 text-uppercase">
+                    <tr>
+                        <th style="width: 12%;">Category</th>
+                        <th>Event & Summary</th>
+                        <th style="width: 15%;">Duration</th>
+                        <th style="width: 15%;">Items Processed</th>
+                        <th style="width: 10%;">Status</th>
+                        <th style="width: 20%;" class="text-end">Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if not activity_logs %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted fs-7">
+                            <i class="fa-solid fa-clock-rotate-left fs-4 mb-2 d-block opacity-50"></i>
+                            No operational logs recorded yet. Source refreshes and TMDB runs will appear here.
+                        </td>
+                    </tr>
+                    {% else %}
+                    {% for a in activity_logs %}
+                    <tr>
+                        <td>
+                            {% if a.category == 'refresh' %}
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Ingestion</span>
+                            {% elif a.category == 'tmdb' %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle">TMDB</span>
+                            {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary border">System</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ a.event }}</div>
+                            {% if a.details %}
+                            <small class="text-secondary text-truncate d-block" style="max-width: 450px;" title="{{ a.details }}">{{ a.details }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.duration_ms %}
+                            <span class="badge bg-light text-dark border font-monospace fs-9">
+                                {% if a.duration_ms >= 1000 %}
+                                {{ "%.2f"|format(a.duration_ms / 1000.0) }}s
+                                {% else %}
+                                {{ "%.0f"|format(a.duration_ms) }}ms
+                                {% endif %}
+                            </span>
+                            {% else %}
+                            <span class="text-muted fs-9">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.items_affected %}
+                            <span class="fw-semibold text-dark fs-8">{{ "{:,}".format(a.items_affected) }} items</span>
+                            {% else %}
+                            <span class="text-muted fs-9">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.status == 'ok' %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle">Success</span>
+                            {% elif a.status == 'cancelled' %}
+                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle">Cancelled</span>
+                            {% else %}
+                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Error</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end text-muted fs-8">
+                            {{ a.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if a.created_at else '—' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Purge Confirmation Modal -->
+<div class="modal fade" id="purgeLogsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border-danger">
+            <div class="modal-header bg-danger-subtle border-danger">
+                <h5 class="modal-title text-danger fw-bold"><i class="fa-solid fa-trash me-2"></i>Purge Old Logs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Purge activity and playback records older than:</p>
+                <select class="form-select mb-3" id="purgeDaysSelect">
+                    <option value="30" selected>30 Days (Default Retention)</option>
+                    <option value="14">14 Days</option>
+                    <option value="7">7 Days</option>
+                    <option value="1">1 Day</option>
+                </select>
+                <small class="text-muted">This frees up SQLite storage while preserving your newest access and operation records.</small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger btn-sm fw-bold" onclick="executePurgeLogs()">
+                    <i class="fa-solid fa-trash me-1"></i> Purge Records
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function purgeLogsModal() {
+    const modalEl = document.getElementById('purgeLogsModal');
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+}
+
+async function executePurgeLogs() {
+    const days = document.getElementById('purgeDaysSelect').value;
+    try {
+        const resp = await fetch(`/api/system/stream-logs/cleanup?days=${days}`, { method: 'POST' });
+        const res = await resp.json();
+        showToast(`Purged ${res.deleted_stream_logs || 0} stream logs and ${res.deleted_activity_logs || 0} operational logs.`);
+        setTimeout(() => location.reload(), 800);
+    } catch (e) {
+        showToast('Failed to purge logs: ' + e.message, true);
+    }
+}
+</script>
+{% endblock %}
+

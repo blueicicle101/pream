@@ -1617,6 +1617,93 @@ async function triggerEnrichTMDB(btn) {
     }
 }
 
+// ── Quick Group Rename & Hide Handlers ──
+function promptRenameGroup(groupName, contentType) {
+    const modalEl = document.getElementById('renameGroupModal');
+    if (!modalEl) return;
+    document.getElementById('renameOldGroupName').value = groupName;
+    document.getElementById('renameNewGroupName').value = groupName;
+    document.getElementById('renameGroupContentType').value = contentType || 'all';
+    const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    bsModal.show();
+}
+
+async function submitRenameGroup(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btnSubmitRenameGroup');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Saving...';
+    }
+
+    const oldName = document.getElementById('renameOldGroupName').value.trim();
+    const newName = document.getElementById('renameNewGroupName').value.trim();
+    const contentType = document.getElementById('renameGroupContentType').value;
+
+    try {
+        const resp = await fetch('/api/rules/quick-rename-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                group_name: oldName,
+                new_name: newName,
+                content_type: contentType
+            })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to rename group');
+        }
+
+        showToast(`Group renamed to "${newName}". Rule created!`);
+        const modalEl = document.getElementById('renameGroupModal');
+        if (modalEl) {
+            const bsModal = bootstrap.Modal.getInstance(modalEl);
+            if (bsModal) bsModal.hide();
+        }
+        setTimeout(() => {
+            window.location.href = `/library?tab=${encodeURIComponent(contentType)}&group=${encodeURIComponent(newName)}`;
+        }, 600);
+    } catch (err) {
+        showToast(err.message, true);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+}
+
+async function promptHideGroup(groupName, contentType) {
+    if (!confirm(`Are you sure you want to permanently hide the entire group "${groupName}"? A hide rule will be created to keep it hidden across all future refreshes.`)) {
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/rules/quick-hide-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                group_name: groupName,
+                content_type: contentType
+            })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to hide group');
+        }
+
+        showToast(`Group "${groupName}" hidden. Rule added!`);
+        setTimeout(() => {
+            window.location.href = `/library?tab=${encodeURIComponent(contentType)}`;
+        }, 600);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+}
+
 async function enrichCurrentGroup(groupName, contentType, btn) {
     if (!confirm(`Enrich all pending ${contentType === 'series' ? 'series' : 'movies'} in "${groupName}" via TMDB?`)) return;
     const originalHtml = btn ? btn.innerHTML : '';

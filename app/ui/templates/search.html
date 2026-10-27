@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Central Search — {{ server_name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+    <div>
+        <h3 class="fw-bold mb-1"><i class="fa-solid fa-magnifying-glass text-primary me-2"></i>Unified Central Search</h3>
+        <p class="text-secondary mb-0">Search all media across Live TV, VOD Movies, and TV Series simultaneously.</p>
+    </div>
+</div>
+
+<!-- Search Input Card -->
+<div class="card shadow-sm border mb-4">
+    <div class="card-body p-3">
+        <form action="/search" method="get" class="d-flex gap-2">
+            <div class="input-group">
+                <span class="input-group-text bg-white border-end-0">
+                    <i class="fa-solid fa-magnifying-glass text-muted"></i>
+                </span>
+                <input type="text" name="q" class="form-control border-start-0" 
+                       placeholder="Search by title, movie name, show or channel..." 
+                       value="{{ q }}" autofocus required>
+            </div>
+            <button type="submit" class="btn btn-primary fw-semibold px-4">
+                Search All
+            </button>
+            {% if q %}
+            <a href="/search" class="btn btn-outline-secondary">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+{% if not q %}
+<div class="card shadow-sm border p-5 text-center text-muted">
+    <i class="fa-solid fa-clapperboard fs-1 mb-3 text-secondary opacity-50"></i>
+    <h5>Search your entire unified catalog</h5>
+    <p class="fs-7 text-secondary mb-0">Enter a keyword above to find Live TV channels, VOD Movies, and TV Series in a single search.</p>
+</div>
+{% else %}
+
+{% set total_found = channels|length + movies|length + series|length %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="fs-7 text-secondary">
+        Found <strong class="text-dark">{{ total_found }}</strong> results for <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-7">"{{ q }}"</span>
+    </div>
+</div>
+
+{% if total_found == 0 %}
+<div class="card shadow-sm border p-5 text-center text-muted">
+    <i class="fa-solid fa-triangle-exclamation fs-1 mb-3 text-warning"></i>
+    <h5>No matches found</h5>
+    <p class="fs-7 text-secondary mb-0">No channels, movies, or series matched "{{ q }}". Try a different title or keyword.</p>
+</div>
+{% endif %}
+
+<!-- Live TV Channels Section -->
+{% if channels %}
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-tv text-primary"></i> Live TV Channels
+            <span class="badge bg-primary rounded-pill fs-8">{{ channels|length }}</span>
+        </h5>
+        <a href="/library?tab=live&q={{ q|urlencode }}" class="btn btn-sm btn-outline-primary fs-8">View all in Library</a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light fs-8 text-uppercase">
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th>Channel Name</th>
+                        <th>Category Group</th>
+                        <th>Source</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ch in channels %}
+                    {% set src = source_map.get(ch.source_id) %}
+                    <tr>
+                        <td class="text-muted fs-8">{{ loop.index }}</td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ ch.display_name }}</div>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-secondary border font-monospace fs-9">{{ ch.display_group }}</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border fs-9">{{ src.name if src else 'Source ' ~ ch.source_id }}</span>
+                        </td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-primary"
+                                onclick="playStream('/live/{{ output_username }}/{{ output_password }}/{{ ch.id }}.ts', '{{ ch.display_name|escape }}', 'live', {{ ch.id }}, 'ts')">
+                                <i class="fa-solid fa-play me-1"></i> Preview
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- VOD Movies Section -->
+{% if movies %}
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-film text-success"></i> VOD Movies
+            <span class="badge bg-success rounded-pill fs-8">{{ movies|length }}</span>
+        </h5>
+        <a href="/library?tab=vod&q={{ q|urlencode }}" class="btn btn-sm btn-outline-success fs-8">View all in Library</a>
+    </div>
+    <div class="card-body p-3">
+        <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-6 g-3">
+            {% for m in movies %}
+            {% set src = source_map.get(m.source_id) %}
+            {% set play_url = "/movie/" ~ output_username ~ "/" ~ output_password ~ "/" ~ m.id ~ "." ~ (m.container_ext or 'mp4') %}
+            <div class="col">
+                <div class="card media-card h-100 shadow-xs border position-relative">
+                    <button class="btn btn-primary rounded-circle shadow floating-action-btn position-absolute top-0 end-0 m-2 z-3" 
+                            onclick="playStream('{{ play_url }}', '{{ m.display_name|escape }}', 'movie', {{ m.id }}, '{{ m.container_ext or 'mp4' }}')"
+                            title="Play Movie">
+                        <i class="fa-solid fa-play fs-8"></i>
+                    </button>
+                    <div class="media-thumb-wrapper d-flex align-items-center justify-content-center ratio ratio-1x1 position-relative cursor-pointer"
+                         onclick="playStream('{{ play_url }}', '{{ m.display_name|escape }}', 'movie', {{ m.id }}, '{{ m.container_ext or 'mp4' }}')">
+                        {% if m.poster_url %}
+                        <img src="{{ m.poster_url }}" class="img-fluid object-fit-cover w-100 h-100" alt="{{ m.display_name }}" loading="lazy" onerror="this.style.display='none'">
+                        {% else %}
+                        <i class="fa-solid fa-film fs-1 text-white opacity-25"></i>
+                        {% endif %}
+                    </div>
+                    <div class="card-body p-2 d-flex flex-column justify-content-between">
+                        <div>
+                            <h6 class="card-title fs-7 fw-semibold text-truncate mb-1 text-dark" title="{{ m.display_name }}">
+                                {{ m.display_name }}
+                            </h6>
+                            <small class="text-secondary fs-8 text-truncate d-block mb-1" title="{{ m.display_group }}">
+                                <i class="fa-regular fa-folder me-1"></i>{{ m.display_group or 'Uncategorized' }}
+                            </small>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center fs-8 text-muted pt-1 border-top">
+                            <span class="fs-9">{{ m.year or '—' }}</span>
+                            {% if m.rating %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-9">
+                                <i class="fa-solid fa-star me-1 text-warning"></i>{{ "%.1f"|format(m.rating) }}
+                            </span>
+                            {% else %}
+                            <span class="badge bg-light text-secondary border fs-9 text-uppercase">{{ m.container_ext or 'mp4' }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- TV Series Section -->
+{% if series %}
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+            <i class="fa-solid fa-clapperboard text-info"></i> TV Series
+            <span class="badge bg-info text-dark rounded-pill fs-8">{{ series|length }}</span>
+        </h5>
+        <a href="/library?tab=series&q={{ q|urlencode }}" class="btn btn-sm btn-outline-info fs-8">View all in Library</a>
+    </div>
+    <div class="card-body p-3">
+        <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-6 g-3">
+            {% for s in series %}
+            {% set src = source_map.get(s.source_id) %}
+            <div class="col">
+                <div class="card media-card h-100 shadow-xs border position-relative">
+                    <button class="btn btn-warning rounded-circle shadow floating-action-btn position-absolute top-0 end-0 m-2 z-3 text-dark" 
+                            onclick="openSeriesEpisodesModal({{ s.id }}, '{{ s.display_name|escape }}')"
+                            title="View Episodes">
+                        <i class="fa-solid fa-list-ol fs-8"></i>
+                    </button>
+                    <div class="media-thumb-wrapper d-flex align-items-center justify-content-center ratio ratio-1x1 position-relative cursor-pointer"
+                         onclick="openSeriesEpisodesModal({{ s.id }}, '{{ s.display_name|escape }}')">
+                        {% if s.poster_url %}
+                        <img src="{{ s.poster_url }}" class="img-fluid object-fit-cover w-100 h-100" alt="{{ s.display_name }}" loading="lazy" onerror="this.style.display='none'">
+                        {% else %}
+                        <i class="fa-solid fa-clapperboard fs-1 text-white opacity-25"></i>
+                        {% endif %}
+                    </div>
+                    <div class="card-body p-2 d-flex flex-column justify-content-between">
+                        <div>
+                            <h6 class="card-title fs-7 fw-semibold text-truncate mb-1 text-dark" title="{{ s.display_name }}">
+                                {{ s.display_name }}
+                            </h6>
+                            <small class="text-secondary fs-8 text-truncate d-block mb-1" title="{{ s.display_group }}">
+                                <i class="fa-regular fa-folder me-1"></i>{{ s.display_group or 'Uncategorized' }}
+                            </small>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center fs-8 text-muted pt-1 border-top">
+                            <span class="fs-9">{{ s.year or '—' }}</span>
+                            {% if s.rating %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle fs-9">
+                                <i class="fa-solid fa-star me-1 text-warning"></i>{{ "%.1f"|format(s.rating) }}
+                            </span>
+                            {% else %}
+                            <span class="badge bg-info-subtle text-info border border-info-subtle fs-9">Series</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+

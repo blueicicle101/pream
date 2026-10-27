@@ -143,14 +143,26 @@
                 {% endif %}
             </div>
 
-            <!-- Scoped Category Enrichment Action -->
-            {% if tab in ('vod', 'series') and current_group %}
+            <!-- Scoped Category Actions (Rename, Hide, Enrich) -->
+            {% if current_group %}
             <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary fw-semibold shadow-xs"
+                        onclick="promptRenameGroup('{{ current_group|escape }}', '{{ tab }}')"
+                        title="Create a rule to permanently rename this group across all items">
+                    <i class="fa-solid fa-pen me-1"></i> Rename Group
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger fw-semibold shadow-xs"
+                        onclick="promptHideGroup('{{ current_group|escape }}', '{{ tab }}')"
+                        title="Create a rule to hide this group from Central Library and output playlists">
+                    <i class="fa-solid fa-eye-slash me-1"></i> Hide Group
+                </button>
+                {% if tab in ('vod', 'series') %}
                 <button type="button" class="btn btn-sm btn-outline-success fw-semibold shadow-xs" 
                         onclick="enrichCurrentGroup('{{ current_group|escape }}', '{{ tab }}', this)"
                         title="Enrich all pending movies/series in this category with TMDB metadata">
                     <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Enrich Category via TMDB
                 </button>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -304,55 +316,6 @@
     </div>
 </div>
 
-<!-- Series Episodes Collection Modal -->
-<div class="modal fade" id="seriesEpisodesModal" tabindex="-1" aria-labelledby="seriesEpisodesModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-        <div class="modal-content shadow border">
-            <div class="modal-header border-bottom">
-                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="seriesEpisodesModalLabel">
-                    <i class="fa-solid fa-clapperboard text-warning"></i> <span id="seriesModalTitle">Series Episodes</span>
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-4" id="seriesEpisodesModalBody">
-                <div class="text-center py-5" id="seriesLoadingSpinner">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading episodes...</span>
-                    </div>
-                    <div class="text-muted mt-2 fs-7">Loading series episodes collection...</div>
-                </div>
-                
-                <div id="seriesModalContent" class="d-none">
-                    <!-- Series Overview Banner -->
-                    <div class="row g-3 mb-4 align-items-center">
-                        <div class="col-auto">
-                            <img id="seriesModalPoster" src="" class="rounded shadow-sm" style="width: 90px; height: 130px; object-fit: cover;" alt="Poster" onerror="this.src='/static/img/placeholder_channel.png'">
-                        </div>
-                        <div class="col">
-                            <h5 id="seriesModalName" class="fw-bold text-dark mb-1"></h5>
-                            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                                <span class="badge bg-light text-dark border" id="seriesModalYear"></span>
-                                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" id="seriesModalRating"></span>
-                                <span class="badge bg-light text-secondary border" id="seriesModalGenre"></span>
-                            </div>
-                            <p class="fs-8 text-secondary mb-0" id="seriesModalPlot"></p>
-                        </div>
-                    </div>
-
-                    <!-- Season Pills Navigation -->
-                    <ul class="nav nav-pills mb-3" id="seriesSeasonsTabs"></ul>
-
-                    <!-- Episodes Container -->
-                    <div id="seriesEpisodesList" class="d-flex flex-column gap-2"></div>
-                </div>
-            </div>
-            <div class="modal-footer border-top">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Manual TMDB Match Search Modal -->
 <div class="modal fade" id="tmdbManualMatchModal" tabindex="-1" aria-labelledby="tmdbManualMatchModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -426,6 +389,44 @@
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Rename Group Modal -->
+<div class="modal fade" id="renameGroupModal" tabindex="-1" aria-labelledby="renameGroupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow border">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="renameGroupModalLabel">
+                    <i class="fa-solid fa-pen text-primary me-2"></i>Rename Category Group
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form onsubmit="submitRenameGroup(event)">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-secondary fs-8 text-uppercase">Current Group Name</label>
+                        <input type="text" class="form-control bg-light" id="renameOldGroupName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark">New Group Name</label>
+                        <input type="text" class="form-control" id="renameNewGroupName" required placeholder="e.g. UK | Documentaries">
+                        <div class="form-text text-muted">
+                            This will create a permanent rule in the Rules Engine and immediately update all current and future items matching this group.
+                        </div>
+                    </div>
+                    <input type="hidden" id="renameGroupContentType" value="all">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold" id="btnSubmitRenameGroup">
+                        <i class="fa-solid fa-floppy-disk me-1"></i> Save & Apply Rule
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
     </div>
 </div>
 {% endblock %}

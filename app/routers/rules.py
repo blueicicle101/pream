@@ -1,9 +1,11 @@
 """
 Rules API router for managing transformation and filtering rules.
 """
+import re
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -119,6 +121,69 @@ def trigger_apply_rules(db: Session = Depends(get_db)):
     """Immediately re-evaluate all rules across the entire library in SQLite."""
     stats = apply_all_rules_to_library(db)
     return stats
+
+
+class QuickGroupActionRequest(BaseModel):
+    group_name: str
+    content_type: str = "all"  # "all", "live", "vod", "series"
+    new_name: str = ""
+
+
+@router.post("/quick-rename-group")
+def quick_rename_group(req: QuickGroupActionRequest, db: Session = Depends(get_db)):
+    """Create a permanent rename_group rule and immediately apply it to the library."""
+    clean_target = req.new_name.strip()
+    if not clean_target:
+        raise HTTPException(status_code=400, detail="New group name cannot be empty")
+
+    escaped_group = re.escape(req.group_name.strip())
+    max_order = db.query(Rule).count()
+    rule = Rule(
+        order=max_order,
+        rule_type="rename_group",
+        content_type=req.content_type if req.content_type in ("live", "vod", "series") else "all",
+        match_field="group",
+        match_pattern=f"^{escaped_group}$",
+        replacement=clean_target,
+        enabled=True,
+        description=f"Quick Rename: '{req.group_name}' -> '{clean_target}'",
+    )
+    db.add(rule)
+    db.commit()
+
+    stats = apply_all_rules_to_library(db)
+    return {
+        "status": "ok",
+        "message": f"Group '{req.group_name}' renamed to '{clean_target}' and rule created.",
+        "rule_id": rule.id,
+        "affected": stats,
+    }
+
+
+@router.post("/quick-hide-group")
+def quick_hide_group(req: QuickGroupActionRequest, db: Session = Depends(get_db)):
+    """Create a permanent hide_group rule and immediately apply it to the library."""
+    escaped_group = re.escape(req.group_name.strip())
+    max_order = db.query(Rule).count()
+    rule = Rule(
+        order=max_order,
+        rule_type="hide_group",
+        content_type=req.content_type if req.content_type in ("live", "vod", "series") else "all",
+        match_field="group",
+        match_pattern=f"^{escaped_group}$",
+        enabled=True,
+        description=f"Quick Hide Group: '{req.group_name}'",
+    )
+    db.add(rule)
+    db.commit()
+
+    stats = apply_all_rules_to_library(db)
+    return {
+        "status": "ok",
+        "message": f"Group '{req.group_name}' hidden and rule created.",
+        "rule_id": rule.id,
+        "affected": stats,
+    }
 
 
 @router.post("/test", response_model=RuleTestResponse)

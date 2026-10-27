@@ -190,6 +190,16 @@ class UITemplateTestCase(unittest.TestCase):
         tmdb_key = self.db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
         self.assertEqual(tmdb_key.value, "my_new_tmdb_key")
 
+    def test_06_search_and_logs_pages(self):
+        """Test GET /search and GET /logs pages render correctly."""
+        res_search = self.client.get("/search")
+        self.assertEqual(res_search.status_code, 200)
+        self.assertIn("Central Search", res_search.text)
+
+        res_logs = self.client.get("/logs")
+        self.assertEqual(res_logs.status_code, 200)
+        self.assertIn("Activity & System Logs", res_logs.text)
+
 
 if __name__ == "__main__":
     unittest.main()
