@@ -50,7 +50,8 @@
                 </a>
 
                 {% for g in groups %}
-                {% set src_ids = group_sources_map.get(g, []) %}
+                {% set src_ids = group_sources_map.get(g, []) if opt_library_source_badges else [] %}
+                {% set cat_cnt = group_counts_map.get(g) if opt_library_category_counts else None %}
                 <a href="/library?tab={{ tab }}&group={{ g|urlencode }}{% if q %}&q={{ q }}{% endif %}" 
                    class="list-group-item list-group-item-action category-item border-0 d-flex justify-content-between align-items-center {% if current_group == g %}active{% endif %}"
                    data-category-name="{{ g }}"
@@ -59,13 +60,18 @@
                         <i class="fa-regular fa-folder me-2 opacity-75"></i> {{ g }}
                     </span>
                     <div class="d-flex align-items-center gap-1 flex-shrink-0">
-                        {% if src_ids|length == 1 %}
-                            {% set s = source_map.get(src_ids[0]) %}
-                            {% if s %}
-                            <span class="badge bg-light text-secondary border rounded-pill fs-9" title="Source: {{ s.name }}">{{ s.name }}</span>
+                        {% if cat_cnt is not none %}
+                        <span class="badge bg-light text-secondary border rounded-pill fs-9" title="{{ cat_cnt }} items">{{ cat_cnt }}</span>
+                        {% endif %}
+                        {% if opt_library_source_badges %}
+                            {% if src_ids|length == 1 %}
+                                {% set s = source_map.get(src_ids[0]) %}
+                                {% if s %}
+                                <span class="badge bg-light text-secondary border rounded-pill fs-9" title="Source: {{ s.name }}">{{ s.name }}</span>
+                                {% endif %}
+                            {% elif src_ids|length > 1 %}
+                                <span class="badge bg-primary-subtle text-primary border rounded-pill fs-9" title="{{ src_ids|length }} sources">{{ src_ids|length }} sources</span>
                             {% endif %}
-                        {% elif src_ids|length > 1 %}
-                            <span class="badge bg-primary-subtle text-primary border rounded-pill fs-9" title="{{ src_ids|length }} sources">{{ src_ids|length }} sources</span>
                         {% endif %}
                         {% if current_group == g %}
                         <i class="fa-solid fa-chevron-right fs-9 text-primary ms-1"></i>
@@ -145,7 +151,7 @@
 
             <!-- Scoped Category Actions (Rename, Hide, Enrich) -->
             {% if current_group %}
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
                 <button type="button" class="btn btn-sm btn-outline-secondary fw-semibold shadow-xs"
                         onclick="promptRenameGroup('{{ current_group|escape }}', '{{ tab }}')"
                         title="Create a rule to permanently rename this group across all items">
@@ -157,11 +163,37 @@
                     <i class="fa-solid fa-eye-slash me-1"></i> Hide Group
                 </button>
                 {% if tab in ('vod', 'series') %}
-                <button type="button" class="btn btn-sm btn-outline-success fw-semibold shadow-xs" 
-                        onclick="enrichCurrentGroup('{{ current_group|escape }}', '{{ tab }}', this)"
-                        title="Enrich all pending movies/series in this category with TMDB metadata">
-                    <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Enrich Category via TMDB
-                </button>
+                <div class="input-group input-group-sm shadow-xs" style="width: auto;">
+                    <span class="input-group-text bg-light text-secondary border-end-0 py-0 px-2" title="Language for TMDB categorization">
+                        <i class="fa-solid fa-language"></i>
+                    </span>
+                    <select class="form-select form-select-sm border-start-0 py-0" id="enrichCategoryLang" style="max-width: 135px;" title="Target language for TMDB categorization">
+                        <option value="" selected>Auto Detect</option>
+                        <option value="EN">English (EN)</option>
+                        <option value="JA">Japanese (JA)</option>
+                        <option value="HI">Hindi (HI)</option>
+                        <option value="ML">Malayalam (ML)</option>
+                        <option value="TA">Tamil (TA)</option>
+                        <option value="DE">German (DE)</option>
+                        <option value="ZH">Chinese (ZH)</option>
+                        <option value="KO">Korean (KO)</option>
+                        <option value="ES">Spanish (ES)</option>
+                        <option value="FR">French (FR)</option>
+                        <option value="IT">Italian (IT)</option>
+                        <option value="NL">Dutch (NL)</option>
+                        <option value="PT">Portuguese (PT)</option>
+                        <option value="RU">Russian (RU)</option>
+                        <option value="TR">Turkish (TR)</option>
+                        <option value="AR">Arabic (AR)</option>
+                        <option value="TE">Telugu (TE)</option>
+                        <option value="PA">Punjabi (PA)</option>
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-success fw-semibold" 
+                            onclick="enrichCurrentGroup('{{ current_group|escape }}', '{{ tab }}', this)"
+                            title="Enrich all pending movies/series in this category with TMDB metadata">
+                        <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Enrich Category
+                    </button>
+                </div>
                 {% endif %}
             </div>
             {% endif %}
@@ -348,16 +380,23 @@
                         <select class="form-select form-select-sm" id="manualMatchLanguage">
                             <option value="">Default (en-US)</option>
                             <option value="en-US">English (en-US)</option>
+                            <option value="ja-JP">Japanese (ja-JP)</option>
+                            <option value="hi-IN">Hindi (hi-IN)</option>
+                            <option value="ml-IN">Malayalam (ml-IN)</option>
+                            <option value="ta-IN">Tamil (ta-IN)</option>
+                            <option value="de-DE">German (de-DE)</option>
+                            <option value="zh-CN">Chinese (zh-CN)</option>
+                            <option value="ko-KR">Korean (ko-KR)</option>
                             <option value="es-ES">Spanish (es-ES)</option>
                             <option value="fr-FR">French (fr-FR)</option>
-                            <option value="de-DE">German (de-DE)</option>
                             <option value="it-IT">Italian (it-IT)</option>
                             <option value="nl-NL">Dutch (nl-NL)</option>
                             <option value="pt-PT">Portuguese (pt-PT)</option>
                             <option value="ru-RU">Russian (ru-RU)</option>
                             <option value="tr-TR">Turkish (tr-TR)</option>
                             <option value="ar-SA">Arabic (ar-SA)</option>
-                            <option value="hi-IN">Hindi (hi-IN)</option>
+                            <option value="te-IN">Telugu (te-IN)</option>
+                            <option value="pa-IN">Punjabi (pa-IN)</option>
                         </select>
                     </div>
                     <div class="col-md-2 d-flex align-items-end">

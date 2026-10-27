@@ -36,7 +36,7 @@
             <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
                 <span class="brand-icon"><i class="fa-solid fa-satellite-dish"></i></span>
                 <span class="tracking-wide text-white">PREAM</span>
-                <span class="badge bg-white text-primary rounded-pill fs-8 fw-bold">v0.3.6</span>
+                <span class="badge bg-white text-primary rounded-pill fs-8 fw-bold">v0.3.7</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#preamNavbar" aria-controls="preamNavbar" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
@@ -253,6 +253,9 @@
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.js"></script>
     <!-- Video.js 8 Player -->
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script>
+        window.PREAM_POLL_INTERVAL = {{ opt_task_poll_interval_ms | default(1500) }};
+    </script>
     <!-- Custom Pream JS -->
     <script src="/static/js/pream.js"></script>
     {% block scripts %}{% endblock %}

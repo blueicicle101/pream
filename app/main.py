@@ -52,6 +52,23 @@ async def lifespan(app: FastAPI):
     # Start background scheduler
     start_scheduler()
 
+    # Optional: startup source refresh (only if explicitly enabled in settings)
+    try:
+        from app.database import SessionLocal
+        from app.models.setting import Setting
+        startup_db = SessionLocal()
+        s_rst = startup_db.query(Setting).filter(Setting.key == "opt_run_startup_tasks").first()
+        run_startup = (s_rst.value.lower() == "true") if s_rst and s_rst.value else settings.OPT_RUN_STARTUP_TASKS
+        startup_db.close()
+        if run_startup:
+            logger.info("Executing automated source refresh on application startup...")
+            from app.services.ingestion.manager import refresh_all_sources
+            asyncio.create_task(refresh_all_sources())
+        else:
+            logger.info("Automated source refresh on application startup is disabled (fast startup).")
+    except Exception as e:
+        logger.warning(f"Could not evaluate startup refresh setting: {e}")
+
     logger.info(f"Started {settings.SERVER_NAME} on {settings.HOST}:{settings.PORT}")
 
     yield

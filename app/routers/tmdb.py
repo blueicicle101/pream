@@ -29,9 +29,10 @@ async def trigger_tmdb_enrich(
     max_items: Optional[int] = Query(None, ge=1, description="Optional cap on items to process in this run"),
     group: Optional[str] = Query(None, description="Optional specific category group to enrich"),
     content_type: Optional[str] = Query(None, description="Optional content type ('vod' or 'series')"),
+    language: Optional[str] = Query(None, description="Optional target language override for categorization and TMDB search"),
     db: Session = Depends(get_db),
 ):
-    """Trigger metadata enrichment for pending movies and TV series (optionally scoped to group or content_type)."""
+    """Trigger metadata enrichment for pending movies and TV series (optionally scoped to group, language, or content_type)."""
     import asyncio
     current_task = asyncio.current_task()
     if current_task:
@@ -44,6 +45,7 @@ async def trigger_tmdb_enrich(
         max_items=max_items,
         group=group,
         content_type=content_type,
+        target_language=language,
     )
     return result
 

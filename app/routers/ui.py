@@ -89,57 +89,95 @@ def page_logout():
     return response
 
 
+def get_runtime_bool_setting(db: Session, key: str, default: bool) -> bool:
+    """Helper to read boolean setting from DB or default to config."""
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if s and s.value:
+        return s.value.strip().lower() in ("true", "1", "yes")
+    return default
+
+
+def get_runtime_int_setting(db: Session, key: str, default: int) -> int:
+    """Helper to read integer setting from DB or default to config."""
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if s and s.value:
+        try:
+            return int(s.value.strip())
+        except ValueError:
+            pass
+    return default
+
+
 @router.get("/", response_class=HTMLResponse)
 def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str = Depends(require_admin)):
-    """Render dashboard overview page."""
+    """Render dashboard overview page with performance optimizations."""
+    opt_source_counts = get_runtime_bool_setting(db, "opt_dashboard_source_counts", settings.OPT_DASHBOARD_SOURCE_COUNTS)
+    opt_total_streams = get_runtime_bool_setting(db, "opt_dashboard_total_streams", settings.OPT_DASHBOARD_TOTAL_STREAMS)
+    opt_tmdb_progress = get_runtime_bool_setting(db, "opt_dashboard_tmdb_progress", settings.OPT_DASHBOARD_TMDB_PROGRESS)
+
     sources = db.query(Source).order_by(Source.priority.asc(), Source.name.asc()).all()
     channel_count = db.query(Channel).filter(Channel.is_hidden == False).count()
-    total_channels = db.query(Channel).count()
     movie_count = db.query(Movie).filter(Movie.is_hidden == False).count()
-    total_movies = db.query(Movie).count()
     series_count = db.query(Series).filter(Series.is_hidden == False).count()
-    total_series = db.query(Series).count()
+
+    total_channels = db.query(Channel).count() if opt_total_streams else channel_count
+    total_movies = db.query(Movie).count() if opt_total_streams else movie_count
+    total_series = db.query(Series).count() if opt_total_streams else series_count
     total_all_streams = total_channels + total_movies + total_series
 
     # Check for first login onboarding
     onboarding_setting = db.query(Setting).filter(Setting.key == "onboarding_completed").first()
     first_login = (onboarding_setting is None) and (len(sources) == 0)
 
-    # Calculate per-source counts efficiently in 3 grouped queries (instead of 3*N queries)
-    live_by_source = dict(
-        db.query(Channel.source_id, func.count(Channel.id))
-        .filter(Channel.is_hidden == False)
-        .group_by(Channel.source_id)
-        .all()
-    )
-    vod_by_source = dict(
-        db.query(Movie.source_id, func.count(Movie.id))
-        .filter(Movie.is_hidden == False)
-        .group_by(Movie.source_id)
-        .all()
-    )
-    series_by_source = dict(
-        db.query(Series.source_id, func.count(Series.id))
-        .filter(Series.is_hidden == False)
-        .group_by(Series.source_id)
-        .all()
-    )
-
+    # Calculate per-source counts efficiently in 3 grouped queries if enabled
     source_stats = []
-    for s in sources:
-        source_stats.append({
-            "source": s,
-            "live_count": live_by_source.get(s.id, 0),
-            "vod_count": vod_by_source.get(s.id, 0),
-            "series_count": series_by_source.get(s.id, 0),
-        })
+    if opt_source_counts and len(sources) > 0:
+        live_by_source = dict(
+            db.query(Channel.source_id, func.count(Channel.id))
+            .filter(Channel.is_hidden == False)
+            .group_by(Channel.source_id)
+            .all()
+        )
+        vod_by_source = dict(
+            db.query(Movie.source_id, func.count(Movie.id))
+            .filter(Movie.is_hidden == False)
+            .group_by(Movie.source_id)
+            .all()
+        )
+        series_by_source = dict(
+            db.query(Series.source_id, func.count(Series.id))
+            .filter(Series.is_hidden == False)
+            .group_by(Series.source_id)
+            .all()
+        )
+        for s in sources:
+            source_stats.append({
+                "source": s,
+                "live_count": live_by_source.get(s.id, 0),
+                "vod_count": vod_by_source.get(s.id, 0),
+                "series_count": series_by_source.get(s.id, 0),
+            })
+    else:
+        for s in sources:
+            source_stats.append({
+                "source": s,
+                "live_count": "-",
+                "vod_count": "-",
+                "series_count": "-",
+            })
 
     # TMDB Enrichment metrics: enriched vs total VOD & Series
-    enriched_movies_count = db.query(Movie).filter(Movie.tmdb_id != None, Movie.is_hidden == False).count()
-    enriched_series_count = db.query(Series).filter(Series.tmdb_id != None, Series.is_hidden == False).count()
     total_vod_and_series = movie_count + series_count
-    total_enriched_count = enriched_movies_count + enriched_series_count
-    enrichment_percentage = round((total_enriched_count / max(1, total_vod_and_series)) * 100, 1) if total_vod_and_series > 0 else 0
+    if opt_tmdb_progress:
+        enriched_movies_count = db.query(Movie).filter(Movie.tmdb_id != None, Movie.is_hidden == False).count()
+        enriched_series_count = db.query(Series).filter(Series.tmdb_id != None, Series.is_hidden == False).count()
+        total_enriched_count = enriched_movies_count + enriched_series_count
+        enrichment_percentage = round((total_enriched_count / max(1, total_vod_and_series)) * 100, 1) if total_vod_and_series > 0 else 0
+    else:
+        enriched_movies_count = 0
+        enriched_series_count = 0
+        total_enriched_count = 0
+        enrichment_percentage = 0
 
     return templates.TemplateResponse(
         request=request,
@@ -155,6 +193,9 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
             "series_count": series_count,
             "total_series": total_series,
             "total_all_streams": total_all_streams,
+            "opt_source_counts": opt_source_counts,
+            "opt_total_streams": opt_total_streams,
+            "opt_tmdb_progress": opt_tmdb_progress,
             "enriched_movies_count": enriched_movies_count,
             "enriched_series_count": enriched_series_count,
             "total_enriched_count": total_enriched_count,
@@ -197,76 +238,58 @@ def page_library(
     sources = db.query(Source).all()
     source_map = {s.id: s for s in sources}
 
+    opt_library_source_badges = get_runtime_bool_setting(db, "opt_library_source_badges", settings.OPT_LIBRARY_SOURCE_BADGES)
+    opt_library_category_counts = get_runtime_bool_setting(db, "opt_library_category_counts", settings.OPT_LIBRARY_CATEGORY_COUNTS)
+
     items = []
     groups = []
     group_sources_map = {}
+    group_counts_map = {}
     total_count = 0
 
-    if tab == "live":
+    target_model = Channel if tab == "live" else (Movie if tab == "vod" else Series)
+
+    if opt_library_source_badges:
         groups_raw = (
-            db.query(Channel.display_group, Channel.source_id)
-            .filter(Channel.is_hidden == False)
+            db.query(target_model.display_group, target_model.source_id)
+            .filter(target_model.is_hidden == False)
             .distinct()
-            .order_by(Channel.display_group.asc())
+            .order_by(target_model.display_group.asc())
             .all()
         )
         for g_name, s_id in groups_raw:
             if g_name:
                 group_sources_map.setdefault(g_name, []).append(s_id)
         groups = sorted(list(group_sources_map.keys()))
-
-        query = db.query(Channel).filter(Channel.is_hidden == False)
-        if group:
-            query = query.filter(Channel.display_group == group)
-        if q:
-            query = query.filter(Channel.display_name.ilike(f"%{q}%"))
-
-        total_count = query.count()
-        items = query.order_by(Channel.display_name.asc()).offset((page - 1) * page_size).limit(page_size).all()
-
-    elif tab == "vod":
+    else:
+        # High speed: fetch unique groups only without joining source_ids
         groups_raw = (
-            db.query(Movie.display_group, Movie.source_id)
-            .filter(Movie.is_hidden == False)
+            db.query(target_model.display_group)
+            .filter(target_model.is_hidden == False)
             .distinct()
-            .order_by(Movie.display_group.asc())
+            .order_by(target_model.display_group.asc())
             .all()
         )
-        for g_name, s_id in groups_raw:
-            if g_name:
-                group_sources_map.setdefault(g_name, []).append(s_id)
-        groups = sorted(list(group_sources_map.keys()))
+        groups = [g[0] for g in groups_raw if g[0]]
 
-        query = db.query(Movie).filter(Movie.is_hidden == False)
-        if group:
-            query = query.filter(Movie.display_group == group)
-        if q:
-            query = query.filter(Movie.display_name.ilike(f"%{q}%"))
-
-        total_count = query.count()
-        items = query.order_by(Movie.display_name.asc()).offset((page - 1) * page_size).limit(page_size).all()
-
-    elif tab == "series":
-        groups_raw = (
-            db.query(Series.display_group, Series.source_id)
-            .filter(Series.is_hidden == False)
-            .distinct()
-            .order_by(Series.display_group.asc())
+    # Optional: category item counts
+    if opt_library_category_counts:
+        cat_counts_raw = (
+            db.query(target_model.display_group, func.count(target_model.id))
+            .filter(target_model.is_hidden == False)
+            .group_by(target_model.display_group)
             .all()
         )
-        for g_name, s_id in groups_raw:
-            if g_name:
-                group_sources_map.setdefault(g_name, []).append(s_id)
-        groups = sorted(list(group_sources_map.keys()))
+        group_counts_map = {g: cnt for g, cnt in cat_counts_raw if g}
 
-        query = db.query(Series).filter(Series.is_hidden == False)
-        if group:
-            query = query.filter(Series.display_group == group)
-        if q:
-            query = query.filter(Series.display_name.ilike(f"%{q}%"))
+    query = db.query(target_model).filter(target_model.is_hidden == False)
+    if group:
+        query = query.filter(target_model.display_group == group)
+    if q:
+        query = query.filter(target_model.display_name.ilike(f"%{q}%"))
 
-        total_count = query.count()
-        items = query.order_by(Series.display_name.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    total_count = query.count()
+    items = query.order_by(target_model.display_name.asc()).offset((page - 1) * page_size).limit(page_size).all()
 
     total_pages = max(1, (total_count + page_size - 1) // page_size)
 
@@ -280,6 +303,9 @@ def page_library(
             "q": q or "",
             "groups": groups,
             "group_sources_map": group_sources_map,
+            "group_counts_map": group_counts_map,
+            "opt_library_source_badges": opt_library_source_badges,
+            "opt_library_category_counts": opt_library_category_counts,
             "items": items,
             "source_map": source_map,
             "page": page,
@@ -488,6 +514,15 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     stream_failover = is_stream_failover_enabled(db)
     stream_history = is_stream_history_enabled(db)
 
+    # Performance & Query Optimization Settings
+    opt_dashboard_source_counts = get_runtime_bool_setting(db, "opt_dashboard_source_counts", settings.OPT_DASHBOARD_SOURCE_COUNTS)
+    opt_dashboard_total_streams = get_runtime_bool_setting(db, "opt_dashboard_total_streams", settings.OPT_DASHBOARD_TOTAL_STREAMS)
+    opt_dashboard_tmdb_progress = get_runtime_bool_setting(db, "opt_dashboard_tmdb_progress", settings.OPT_DASHBOARD_TMDB_PROGRESS)
+    opt_library_source_badges = get_runtime_bool_setting(db, "opt_library_source_badges", settings.OPT_LIBRARY_SOURCE_BADGES)
+    opt_library_category_counts = get_runtime_bool_setting(db, "opt_library_category_counts", settings.OPT_LIBRARY_CATEGORY_COUNTS)
+    opt_task_poll_interval_ms = get_runtime_int_setting(db, "opt_task_poll_interval_ms", settings.OPT_TASK_POLL_INTERVAL_MS)
+    opt_run_startup_tasks = get_runtime_bool_setting(db, "opt_run_startup_tasks", settings.OPT_RUN_STARTUP_TASKS)
+
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
@@ -515,6 +550,13 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "stream_health_count": stream_health_count,
             "stream_failover": stream_failover,
             "stream_history": stream_history,
+            "opt_dashboard_source_counts": opt_dashboard_source_counts,
+            "opt_dashboard_total_streams": opt_dashboard_total_streams,
+            "opt_dashboard_tmdb_progress": opt_dashboard_tmdb_progress,
+            "opt_library_source_badges": opt_library_source_badges,
+            "opt_library_category_counts": opt_library_category_counts,
+            "opt_task_poll_interval_ms": opt_task_poll_interval_ms,
+            "opt_run_startup_tasks": opt_run_startup_tasks,
             "output_username": settings.OUTPUT_USERNAME,
             "output_password": settings.OUTPUT_PASSWORD,
             "server_name": settings.SERVER_NAME,
@@ -549,6 +591,13 @@ def update_settings(
     refresh_cron: Optional[str] = Form("0 4 * * *"),
     sql_timing_enabled: Optional[str] = Form(None),
     sql_timing_threshold_ms: Optional[str] = Form("10.0"),
+    opt_dashboard_source_counts: Optional[str] = Form(None),
+    opt_dashboard_total_streams: Optional[str] = Form(None),
+    opt_dashboard_tmdb_progress: Optional[str] = Form(None),
+    opt_library_source_badges: Optional[str] = Form(None),
+    opt_library_category_counts: Optional[str] = Form(None),
+    opt_task_poll_interval_ms: Optional[str] = Form("1500"),
+    opt_run_startup_tasks: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ):
@@ -564,6 +613,16 @@ def update_settings(
     tmdb_en_val = "true" if tmdb_enabled else "false"
     tmdb_ag_val = "true" if tmdb_auto_group else "false"
     gemini_stag_val = "true" if staggered_gemini_calls else "false"
+    opt_dsc_val = "true" if opt_dashboard_source_counts else "false"
+    opt_dts_val = "true" if opt_dashboard_total_streams else "false"
+    opt_dtp_val = "true" if opt_dashboard_tmdb_progress else "false"
+    opt_lsb_val = "true" if opt_library_source_badges else "false"
+    opt_lcc_val = "true" if opt_library_category_counts else "false"
+    opt_rst_val = "true" if opt_run_startup_tasks else "false"
+    try:
+        opt_poll_val = str(max(0, int(opt_task_poll_interval_ms or 1500)))
+    except ValueError:
+        opt_poll_val = "1500"
     try:
         sst_val = str(max(1, min(2, int(source_scan_threads or 1))))
     except ValueError:
@@ -612,6 +671,13 @@ def update_settings(
         ("telegram_bot_token", (telegram_bot_token or "").strip()),
         ("telegram_chat_id", (telegram_chat_id or "").strip()),
         ("refresh_cron", (refresh_cron or "0 4 * * *").strip()),
+        ("opt_dashboard_source_counts", opt_dsc_val),
+        ("opt_dashboard_total_streams", opt_dts_val),
+        ("opt_dashboard_tmdb_progress", opt_dtp_val),
+        ("opt_library_source_badges", opt_lsb_val),
+        ("opt_library_category_counts", opt_lcc_val),
+        ("opt_task_poll_interval_ms", opt_poll_val),
+        ("opt_run_startup_tasks", opt_rst_val),
     ]
 
     for key, val in pairs:

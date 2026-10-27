@@ -129,9 +129,14 @@ class QuickGroupActionRequest(BaseModel):
     new_name: str = ""
 
 
+from app.models.channel import Channel
+from app.models.movie import Movie
+from app.models.series import Series
+
+
 @router.post("/quick-rename-group")
 def quick_rename_group(req: QuickGroupActionRequest, db: Session = Depends(get_db)):
-    """Create a permanent rename_group rule and immediately apply it to the library."""
+    """Create a permanent rename_group rule and perform a fast targeted update on matching items."""
     clean_target = req.new_name.strip()
     if not clean_target:
         raise HTTPException(status_code=400, detail="New group name cannot be empty")
@@ -149,20 +154,40 @@ def quick_rename_group(req: QuickGroupActionRequest, db: Session = Depends(get_d
         description=f"Quick Rename: '{req.group_name}' -> '{clean_target}'",
     )
     db.add(rule)
+
+    # Fast targeted direct update on SQLite
+    affected = 0
+    target_ct = req.content_type.lower() if req.content_type else "all"
+    if target_ct in ("all", "live"):
+        c_count = db.query(Channel).filter(Channel.display_group == req.group_name).update(
+            {Channel.display_group: clean_target}, synchronize_session=False
+        )
+        affected += c_count
+    if target_ct in ("all", "vod", "movie"):
+        m_count = db.query(Movie).filter(Movie.display_group == req.group_name).update(
+            {Movie.display_group: clean_target}, synchronize_session=False
+        )
+        affected += m_count
+    if target_ct in ("all", "series"):
+        s_count = db.query(Series).filter(Series.display_group == req.group_name).update(
+            {Series.display_group: clean_target}, synchronize_session=False
+        )
+        affected += s_count
+
+    rule.affected_count = affected
     db.commit()
 
-    stats = apply_all_rules_to_library(db)
     return {
         "status": "ok",
-        "message": f"Group '{req.group_name}' renamed to '{clean_target}' and rule created.",
+        "message": f"Group '{req.group_name}' renamed to '{clean_target}' ({affected} items updated).",
         "rule_id": rule.id,
-        "affected": stats,
+        "affected": {"total_modified": affected},
     }
 
 
 @router.post("/quick-hide-group")
 def quick_hide_group(req: QuickGroupActionRequest, db: Session = Depends(get_db)):
-    """Create a permanent hide_group rule and immediately apply it to the library."""
+    """Create a permanent hide_group rule and perform a fast targeted update on matching items."""
     escaped_group = re.escape(req.group_name.strip())
     max_order = db.query(Rule).count()
     rule = Rule(
@@ -175,14 +200,33 @@ def quick_hide_group(req: QuickGroupActionRequest, db: Session = Depends(get_db)
         description=f"Quick Hide Group: '{req.group_name}'",
     )
     db.add(rule)
+
+    affected = 0
+    target_ct = req.content_type.lower() if req.content_type else "all"
+    if target_ct in ("all", "live"):
+        c_count = db.query(Channel).filter(Channel.display_group == req.group_name).update(
+            {Channel.is_hidden: True}, synchronize_session=False
+        )
+        affected += c_count
+    if target_ct in ("all", "vod", "movie"):
+        m_count = db.query(Movie).filter(Movie.display_group == req.group_name).update(
+            {Movie.is_hidden: True}, synchronize_session=False
+        )
+        affected += m_count
+    if target_ct in ("all", "series"):
+        s_count = db.query(Series).filter(Series.display_group == req.group_name).update(
+            {Series.is_hidden: True}, synchronize_session=False
+        )
+        affected += s_count
+
+    rule.affected_count = affected
     db.commit()
 
-    stats = apply_all_rules_to_library(db)
     return {
         "status": "ok",
-        "message": f"Group '{req.group_name}' hidden and rule created.",
+        "message": f"Group '{req.group_name}' hidden ({affected} items hidden).",
         "rule_id": rule.id,
-        "affected": stats,
+        "affected": {"total_modified": affected},
     }
 
 

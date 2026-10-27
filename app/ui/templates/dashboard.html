@@ -12,9 +12,13 @@
                 <div>
                     <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">Live Channels</h6>
                     <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(channel_count) }}</h2>
+                    {% if opt_total_streams %}
                     <div class="fs-8 text-secondary mt-1">
                         out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_channels) }}</span> total streams
                     </div>
+                    {% else %}
+                    <div class="fs-8 text-secondary mt-1">active streams</div>
+                    {% endif %}
                 </div>
                 <div class="stat-icon-wrapper rounded-circle bg-primary-subtle text-primary p-3">
                     <i class="fa-solid fa-tv fs-4"></i>
@@ -30,9 +34,13 @@
                 <div>
                     <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">VOD Movies</h6>
                     <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(movie_count) }}</h2>
+                    {% if opt_total_streams %}
                     <div class="fs-8 text-secondary mt-1">
                         out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_movies) }}</span> total streams
                     </div>
+                    {% else %}
+                    <div class="fs-8 text-secondary mt-1">active titles</div>
+                    {% endif %}
                 </div>
                 <div class="stat-icon-wrapper rounded-circle bg-success-subtle text-success p-3">
                     <i class="fa-solid fa-film fs-4"></i>
@@ -48,9 +56,13 @@
                 <div>
                     <h6 class="text-uppercase text-muted fs-8 fw-bold mb-1">TV Series</h6>
                     <h2 class="display-6 fw-bold mb-0 text-dark">{{ "{:,}".format(series_count) }}</h2>
+                    {% if opt_total_streams %}
                     <div class="fs-8 text-secondary mt-1">
                         out of <span class="fw-semibold text-dark">{{ "{:,}".format(total_series) }}</span> total streams
                     </div>
+                    {% else %}
+                    <div class="fs-8 text-secondary mt-1">active series</div>
+                    {% endif %}
                 </div>
                 <div class="stat-icon-wrapper rounded-circle bg-warning-subtle text-warning p-3">
                     <i class="fa-solid fa-clapperboard fs-4"></i>
@@ -78,6 +90,7 @@
     </div>
 
     <!-- Stat: TMDB Metadata Enrichment -->
+    {% if opt_tmdb_progress %}
     <div class="col-12 col-sm-6 col-lg-4 col-xl">
         <div class="card stat-card shadow-sm h-100 border-start border-4 border-success">
             <div class="card-body d-flex align-items-center justify-content-between p-4">
@@ -95,6 +108,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 
 <!-- Main Section: Sources Overview & Quick Actions -->

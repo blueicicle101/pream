@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     SQL_TIMING_ENABLED: bool = False  # Log slow SQL queries with execution time
     SQL_TIMING_THRESHOLD_MS: float = 10.0  # Threshold in ms to trigger slow query logging
 
+    # ── Performance & Query Tuning ──
+    OPT_DASHBOARD_SOURCE_COUNTS: bool = True  # Grouped source stream breakdown on dashboard
+    OPT_DASHBOARD_TOTAL_STREAMS: bool = True  # Subtext counting total streams including hidden
+    OPT_DASHBOARD_TMDB_PROGRESS: bool = True  # TMDB enrichment progress widget on dashboard
+    OPT_LIBRARY_SOURCE_BADGES: bool = True  # Provider badges in library category sidebar
+    OPT_LIBRARY_CATEGORY_COUNTS: bool = False  # Exact item counts in library category sidebar
+    OPT_TASK_POLL_INTERVAL_MS: int = 1500  # Interval (ms) for footer status polling (1500, 3000, 5000, 10000, 0=off)
+    OPT_RUN_STARTUP_TASKS: bool = False  # Automatically execute source refresh upon application startup
+
     # ── Scheduler ──
     REFRESH_CRON_ENABLED: bool = True  # Master switch for automated cron schedule
     REFRESH_CRON: str = "0 4 * * *"  # 4 AM daily

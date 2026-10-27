@@ -140,6 +140,80 @@
                 </div>
             </div>
 
+            <!-- Performance & Query Optimization -->
+            <div class="card shadow-sm border mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 d-flex align-items-center gap-2 fs-6 fw-bold">
+                        <i class="fa-solid fa-gauge-high text-primary"></i> Performance & Query Tuning
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="fs-7 text-secondary mb-3">
+                        Selectively disable resource-heavy queries, reduce background polling, and speed up UI responses.
+                    </p>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_dashboard_source_counts" id="optDashboardSourceCounts" {% if opt_dashboard_source_counts %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optDashboardSourceCounts">Dashboard: Per-Source Stream Breakdown</label>
+                        <div class="form-text text-muted">
+                            When disabled, skips <code>GROUP BY source_id</code> queries across live, VOD, and series tables on dashboard load.
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_dashboard_total_streams" id="optDashboardTotalStreams" {% if opt_dashboard_total_streams %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optDashboardTotalStreams">Dashboard: Total Streams Subtext (Unfiltered Counts)</label>
+                        <div class="form-text text-muted">
+                            When disabled, avoids counting hidden/raw streams (saves 3 full-table <code>SELECT count(*)</code> scans on dashboard).
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_dashboard_tmdb_progress" id="optDashboardTmdbProgress" {% if opt_dashboard_tmdb_progress %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optDashboardTmdbProgress">Dashboard: TMDB Enrichment Progress Widget</label>
+                        <div class="form-text text-muted">
+                            When disabled, skips counting enriched items (<code>tmdb_id IS NOT NULL</code>) on the dashboard overview.
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_library_source_badges" id="optLibrarySourceBadges" {% if opt_library_source_badges %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optLibrarySourceBadges">Central Library: Source Badges in Categories</label>
+                        <div class="form-text text-muted">
+                            When enabled, queries which provider supplies each category. When disabled, performs a fast distinct group scan without source mapping.
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_library_category_counts" id="optLibraryCategoryCounts" {% if opt_library_category_counts %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optLibraryCategoryCounts">Central Library: Exact Item Counts in Categories</label>
+                        <div class="form-text text-muted">
+                            Computes exact stream counts for each category in the sidebar. Keep disabled for instant sidebar rendering on large libraries.
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="opt_run_startup_tasks" id="optRunStartupTasks" {% if opt_run_startup_tasks %}checked{% endif %}>
+                        <label class="form-check-label fw-semibold text-dark" for="optRunStartupTasks">Execute Source Refresh on Application Startup</label>
+                        <div class="form-text text-muted">
+                            Keep disabled to prevent immediate background ingestion lockups when the server boots.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-dark fs-7">Task Progress Polling Frequency (Footer Banner)</label>
+                        <select class="form-select form-select-sm" name="opt_task_poll_interval_ms" style="max-width: 220px;">
+                            <option value="1500" {% if opt_task_poll_interval_ms == 1500 %}selected{% endif %}>1.5 seconds (Default)</option>
+                            <option value="3000" {% if opt_task_poll_interval_ms == 3000 %}selected{% endif %}>3.0 seconds</option>
+                            <option value="5000" {% if opt_task_poll_interval_ms == 5000 %}selected{% endif %}>5.0 seconds (Recommended)</option>
+                            <option value="10000" {% if opt_task_poll_interval_ms == 10000 %}selected{% endif %}>10.0 seconds</option>
+                            <option value="0" {% if opt_task_poll_interval_ms == 0 %}selected{% endif %}>Disabled (Zero Polling)</option>
+                        </select>
+                        <div class="form-text text-muted">Interval for the UI to query <code>/api/system/task-progress</code>. Increasing to 5s reduces server request volume by 70%.</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Library Organization & Scanning -->
             <div class="card shadow-sm border mb-4">
                 <div class="card-header bg-white border-bottom py-3">

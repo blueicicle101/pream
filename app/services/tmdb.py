@@ -79,6 +79,29 @@ YEAR_REGEX = re.compile(r"\b(19\d{2}|20\d{2})\b")
 # Robust language prefix regex: matches standalone codes or brackets/delimiters like [EN], |EN|, EN |, EN -
 LANG_PREFIX_REGEX = re.compile(r"(?:^|[\[\|\(\s_-])([A-Z]{2,3})(?:[\]\|\)\s_:-]|$)", re.IGNORECASE)
 
+# Mapping of ISO 639-1 / country codes to display language names and codes
+SUPPORTED_LANGUAGES = {
+    "EN": {"name": "English", "tmdb": "en-US"},
+    "JA": {"name": "Japanese", "tmdb": "ja-JP"},
+    "HI": {"name": "Hindi", "tmdb": "hi-IN"},
+    "ML": {"name": "Malayalam", "tmdb": "ml-IN"},
+    "TA": {"name": "Tamil", "tmdb": "ta-IN"},
+    "DE": {"name": "German", "tmdb": "de-DE"},
+    "ZH": {"name": "Chinese", "tmdb": "zh-CN"},
+    "KO": {"name": "Korean", "tmdb": "ko-KR"},
+    "ES": {"name": "Spanish", "tmdb": "es-ES"},
+    "FR": {"name": "French", "tmdb": "fr-FR"},
+    "IT": {"name": "Italian", "tmdb": "it-IT"},
+    "NL": {"name": "Dutch", "tmdb": "nl-NL"},
+    "PT": {"name": "Portuguese", "tmdb": "pt-PT"},
+    "RU": {"name": "Russian", "tmdb": "ru-RU"},
+    "TR": {"name": "Turkish", "tmdb": "tr-TR"},
+    "AR": {"name": "Arabic", "tmdb": "ar-SA"},
+    "TE": {"name": "Telugu", "tmdb": "te-IN"},
+    "BN": {"name": "Bengali", "tmdb": "bn-IN"},
+    "PA": {"name": "Punjabi", "tmdb": "pa-IN"},
+}
+
 GENRE_MAP = {
     28: "Action",
     12: "Adventure",
@@ -228,6 +251,8 @@ def detect_language_code(group_name: Optional[str]) -> str:
       - '[UK] Action 4K' -> 'UK'
       - '|FR| Comedies' -> 'FR'
       - 'NL - Series' -> 'NL'
+      - 'HI | Action' -> 'HI'
+      - 'JAP | Anime' -> 'JA'
     Defaults to 'EN' if not recognized.
     """
     if not group_name:
@@ -236,7 +261,22 @@ def detect_language_code(group_name: Optional[str]) -> str:
     match = LANG_PREFIX_REGEX.search(clean)
     if match:
         code = match.group(1).upper()
-        if code in ("EN", "UK", "US", "NL", "DE", "FR", "ES", "IT", "PT", "AR", "RU", "TR", "IN", "PL", "GR", "SE", "NO", "DK", "FI"):
+        if code in ("JAP", "JPN"):
+            return "JA"
+        if code in ("KOR",):
+            return "KO"
+        if code in ("CHI", "CHN"):
+            return "ZH"
+        if code in ("MAL",):
+            return "ML"
+        if code in ("TAM",):
+            return "TA"
+        if code in ("HIN",):
+            return "HI"
+        if code in ("GER",):
+            return "DE"
+        if code in SUPPORTED_LANGUAGES or code in ("EN", "UK", "US", "NL", "DE", "FR", "ES", "IT", "PT", "AR", "RU", "TR", "IN", "PL", "GR", "SE", "NO", "DK", "FI"):
+            return code
             return code
     return "EN"
 
@@ -415,13 +455,26 @@ async def search_tv_tmdb(
     return [] if return_all else None
 
 
-async def enrich_movie(movie: Movie, api_key: str, db: Optional[Session] = None) -> bool:
+async def enrich_movie(
+    movie: Movie,
+    api_key: str,
+    db: Optional[Session] = None,
+    preferred_language: Optional[str] = None,
+) -> bool:
     """
     Enrich a single movie record with TMDB metadata.
     Uses regex cleaner first; falls back to Gemini Flash-Lite if available and needed.
     """
     clean_title, year = clean_media_title(movie.raw_name)
-    result = await search_movie_tmdb(clean_title, year or movie.year, api_key)
+    tmdb_lang_param = None
+    if preferred_language:
+        lang_info = SUPPORTED_LANGUAGES.get(preferred_language.upper())
+        if lang_info:
+            tmdb_lang_param = lang_info["tmdb"]
+
+    result = await search_movie_tmdb(clean_title, year or movie.year, api_key, language=tmdb_lang_param)
+    if not result and tmdb_lang_param:
+        result = await search_movie_tmdb(clean_title, year or movie.year, api_key)
 
     ai_lang_code = None
     # If regex search yields no match and Gemini API key is available, attempt AI extraction
@@ -485,8 +538,12 @@ async def enrich_movie(movie: Movie, api_key: str, db: Optional[Session] = None)
         movie.genre = ", ".join(genre_names)
         if is_tmdb_auto_group_enabled(db):
             primary_genre = genre_names[0]
-            # Use AI detected language code if available, else group prefix detection
-            lang = ai_lang_code or detect_language_code(movie.raw_group or movie.display_group)
+            # Use preferred language if provided, else AI detected language, else group prefix
+            lang = (
+                preferred_language.upper()
+                if preferred_language
+                else (ai_lang_code or detect_language_code(movie.raw_group or movie.display_group))
+            )
             movie.display_group = f"{lang} | {primary_genre}"
 
     # Safety Net: Guarantee display_name and display_group never become blank
@@ -500,13 +557,26 @@ async def enrich_movie(movie: Movie, api_key: str, db: Optional[Session] = None)
     return True
 
 
-async def enrich_series(series: Series, api_key: str, db: Optional[Session] = None) -> bool:
+async def enrich_series(
+    series: Series,
+    api_key: str,
+    db: Optional[Session] = None,
+    preferred_language: Optional[str] = None,
+) -> bool:
     """
     Enrich a single TV series record with TMDB metadata.
     Uses regex cleaner first; falls back to Gemini Flash-Lite if available and needed.
     """
     clean_title, year = clean_media_title(series.raw_name)
-    result = await search_tv_tmdb(clean_title, year or series.year, api_key)
+    tmdb_lang_param = None
+    if preferred_language:
+        lang_info = SUPPORTED_LANGUAGES.get(preferred_language.upper())
+        if lang_info:
+            tmdb_lang_param = lang_info["tmdb"]
+
+    result = await search_tv_tv_tmdb(clean_title, year or series.year, api_key, language=tmdb_lang_param) if "search_tv_tv_tmdb" in globals() else await search_tv_tmdb(clean_title, year or series.year, api_key, language=tmdb_lang_param)
+    if not result and tmdb_lang_param:
+        result = await search_tv_tmdb(clean_title, year or series.year, api_key)
 
     ai_lang_code = None
     gemini_key = get_gemini_api_key(db) if is_gemini_enabled(db) else None
@@ -563,7 +633,11 @@ async def enrich_series(series: Series, api_key: str, db: Optional[Session] = No
         series.genre = ", ".join(genre_names)
         if is_tmdb_auto_group_enabled(db):
             primary_genre = genre_names[0]
-            lang = ai_lang_code or detect_language_code(series.raw_group or series.display_group)
+            lang = (
+                preferred_language.upper()
+                if preferred_language
+                else (ai_lang_code or detect_language_code(series.raw_group or series.display_group))
+            )
             series.display_group = f"{lang} | {primary_genre}"
 
     # Safety Net: Guarantee display_name and display_group never become blank
@@ -584,6 +658,7 @@ async def enrich_pending_media(
     max_items: Optional[int] = None,
     group: Optional[str] = None,
     content_type: Optional[str] = None,  # "vod" or "series" or None (both)
+    target_language: Optional[str] = None,  # Override language (e.g. "HI", "JA", "ML", "TA", "DE", "ZH", "KO", "EN")
 ) -> Dict[str, Any]:
     """
     Enrich movies and series missing TMDB metadata.
@@ -699,7 +774,7 @@ async def enrich_pending_media(
                 f"Enriching [{processed_count}/{target_total}]: '{clean_title}'...",
                 pct,
             )
-            if await enrich_movie(movie, api_key, db=db):
+            if await enrich_movie(movie, api_key, db=db, preferred_language=target_language):
                 total_movies_enriched += 1
                 dup_count = await sync_duplicate_movies(movie, db)
                 total_movies_enriched += dup_count
@@ -727,7 +802,7 @@ async def enrich_pending_media(
                 f"Enriching [{processed_count}/{target_total}]: '{clean_title}'...",
                 pct,
             )
-            if await enrich_series(s, api_key, db=db):
+            if await enrich_series(s, api_key, db=db, preferred_language=target_language):
                 total_series_enriched += 1
                 dup_count = await sync_duplicate_series(s, db)
                 total_series_enriched += dup_count

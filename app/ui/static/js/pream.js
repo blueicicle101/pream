@@ -1705,16 +1705,24 @@ async function promptHideGroup(groupName, contentType) {
 }
 
 async function enrichCurrentGroup(groupName, contentType, btn) {
-    if (!confirm(`Enrich all pending ${contentType === 'series' ? 'series' : 'movies'} in "${groupName}" via TMDB?`)) return;
+    const langSelect = document.getElementById('enrichCategoryLang');
+    const targetLang = langSelect ? langSelect.value.trim() : '';
+    const langLabel = targetLang ? ` with language [${targetLang}]` : '';
+
+    if (!confirm(`Enrich all pending ${contentType === 'series' ? 'series' : 'movies'} in "${groupName}" via TMDB${langLabel}?`)) return;
     const originalHtml = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Enriching Category...';
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Enriching...';
     }
     updateFooterTaskProgress();
 
     try {
-        const resp = await fetch(`/api/tmdb/enrich?group=${encodeURIComponent(groupName)}&content_type=${encodeURIComponent(contentType)}&batch_size=100`, { method: 'POST' });
+        let url = `/api/tmdb/enrich?group=${encodeURIComponent(groupName)}&content_type=${encodeURIComponent(contentType)}&batch_size=100`;
+        if (targetLang) {
+            url += `&language=${encodeURIComponent(targetLang)}`;
+        }
+        const resp = await fetch(url, { method: 'POST' });
         const res = await resp.json();
         updateFooterTaskProgress();
         if (res.status === 'ok') {
@@ -2431,5 +2439,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initThemeToggle();
     initRulesAccordion();
     updateFooterTaskProgress();
-    setInterval(updateFooterTaskProgress, 1500);
+
+    // Configurable task progress poll interval
+    const pollInterval = window.PREAM_POLL_INTERVAL !== undefined ? window.PREAM_POLL_INTERVAL : 1500;
+    if (pollInterval > 0) {
+        setInterval(updateFooterTaskProgress, pollInterval);
+    }
 });
