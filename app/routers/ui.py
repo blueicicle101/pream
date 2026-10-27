@@ -112,17 +112,33 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
         .all()
     )
 
-    # Calculate per-source counts
+    # Calculate per-source counts efficiently in 3 grouped queries (instead of 3*N queries)
+    live_by_source = dict(
+        db.query(Channel.source_id, func.count(Channel.id))
+        .filter(Channel.is_hidden == False)
+        .group_by(Channel.source_id)
+        .all()
+    )
+    vod_by_source = dict(
+        db.query(Movie.source_id, func.count(Movie.id))
+        .filter(Movie.is_hidden == False)
+        .group_by(Movie.source_id)
+        .all()
+    )
+    series_by_source = dict(
+        db.query(Series.source_id, func.count(Series.id))
+        .filter(Series.is_hidden == False)
+        .group_by(Series.source_id)
+        .all()
+    )
+
     source_stats = []
     for s in sources:
-        live = db.query(Channel).filter(Channel.source_id == s.id, Channel.is_hidden == False).count()
-        vod = db.query(Movie).filter(Movie.source_id == s.id, Movie.is_hidden == False).count()
-        ser = db.query(Series).filter(Series.source_id == s.id, Series.is_hidden == False).count()
         source_stats.append({
             "source": s,
-            "live_count": live,
-            "vod_count": vod,
-            "series_count": ser,
+            "live_count": live_by_source.get(s.id, 0),
+            "vod_count": vod_by_source.get(s.id, 0),
+            "series_count": series_by_source.get(s.id, 0),
         })
 
     # TMDB Enrichment metrics: enriched vs total VOD & Series

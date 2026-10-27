@@ -123,6 +123,11 @@ def _migrate_sqlite_schema(target_engine=None):
                 ("idx_series_display_name", "series", "display_name"),
                 ("idx_series_is_hidden", "series", "is_hidden"),
                 ("idx_series_tmdb_fetched_at", "series", "tmdb_fetched_at"),
+                ("idx_channels_src_hidden", "channels", "source_id, is_hidden"),
+                ("idx_movies_src_hidden", "movies", "source_id, is_hidden"),
+                ("idx_series_src_hidden", "series", "source_id, is_hidden"),
+                ("idx_movies_hidden_tmdb", "movies", "is_hidden, tmdb_id"),
+                ("idx_series_hidden_tmdb", "series", "is_hidden, tmdb_id"),
             ]
             for idx_name, tbl, col in indices_to_create:
                 if tbl in table_names:
