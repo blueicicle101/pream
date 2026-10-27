@@ -69,6 +69,8 @@ def _migrate_sqlite_schema(target_engine=None):
                     conn.execute(text("ALTER TABLE sources ADD COLUMN expiry_date TEXT"))
                 if "max_connections" not in source_cols:
                     conn.execute(text("ALTER TABLE sources ADD COLUMN max_connections TEXT"))
+                if "selected_categories" not in source_cols:
+                    conn.execute(text("ALTER TABLE sources ADD COLUMN selected_categories TEXT"))
 
             # Create performance indices for high-frequency search and grouping queries
             indices_to_create = [

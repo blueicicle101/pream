@@ -135,6 +135,13 @@
                         </td>
                         <td class="text-end">
                             <div class="btn-group btn-group-sm">
+                                {% if s.type == 'xtream' %}
+                                <button class="btn {% if s.has_category_filter %}btn-info text-white{% else %}btn-outline-info{% endif %}"
+                                    onclick="openCategoryFilterModal({{ s.id }}, '{{ s.name|escape }}')"
+                                    title="{% if s.has_category_filter %}Custom categories filtered — click to edit{% else %}Filter categories to import{% endif %}">
+                                    <i class="fa-solid fa-filter me-1"></i>Categories
+                                </button>
+                                {% endif %}
                                 <button class="btn btn-outline-secondary"
                                     onclick="triggerRefreshSource({{ s.id }}, this)" title="Refresh">
                                     <i class="fa-solid fa-arrows-rotate"></i>
@@ -250,6 +257,9 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-outline-primary fw-semibold" id="btnSaveAndSelectCategories" onclick="submitAddSource(event, true)">
+                        <i class="fa-solid fa-filter me-1"></i> Save & Select Categories
+                    </button>
                     <button type="submit" class="btn btn-primary fw-semibold" id="btnSaveSource">Save Source</button>
                 </div>
             </form>
@@ -346,6 +356,9 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-outline-info fw-semibold" id="btnEditSelectCategories" onclick="openCategoriesFromEditModal()">
+                        <i class="fa-solid fa-filter me-1"></i> Configure Categories
+                    </button>
                     <button type="submit" class="btn btn-primary fw-semibold" id="btnUpdateSource">Update
                         Source</button>
                 </div>
@@ -431,6 +444,129 @@
                 <button type="button" class="btn btn-danger btn-sm fw-semibold" id="btnConfirmDeleteSource" onclick="confirmDeleteSourceAction()">
                     <i class="fa-solid fa-trash me-1"></i> Delete Source & Purge Streams
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Category Filter Modal -->
+<div class="modal fade" id="categoryFilterModal" tabindex="-1" aria-labelledby="categoryFilterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow border">
+            <div class="modal-header border-bottom">
+                <div>
+                    <h5 class="modal-title fw-bold" id="categoryFilterModalLabel">
+                        <i class="fa-solid fa-filter text-primary me-2"></i>Filter Categories to Ingest
+                    </h5>
+                    <div class="text-secondary fs-8" id="catModalSourceSubtitle">Source: Loading...</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div id="catModalLoading" class="text-center py-5">
+                    <i class="fa-solid fa-spinner fa-spin text-primary fs-2 mb-3 d-block"></i>
+                    <div class="text-secondary fw-semibold">Fetching upstream categories...</div>
+                    <small class="text-muted">Querying Live TV, VOD Movies, and TV Series category lists from provider.</small>
+                </div>
+
+                <div id="catModalContent" class="d-none">
+                    <div class="alert alert-info py-2 px-3 fs-8 mb-3 d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-circle-info fs-6 flex-shrink-0"></i>
+                        <div>
+                            Selecting specific categories drastically cuts download size, memory, and scan times.
+                            If no categories are selected in a tab (or if set to all), all categories for that content type will be imported.
+                        </div>
+                    </div>
+
+                    <!-- Category Type Tabs -->
+                    <ul class="nav nav-pills nav-fill mb-3" id="catTypeTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active fw-semibold d-flex justify-content-center align-items-center gap-2"
+                                id="cat-tab-live" data-bs-toggle="pill" data-bs-target="#cat-pane-live" type="button" role="tab">
+                                <i class="fa-solid fa-tv"></i> Live TV
+                                <span class="badge rounded-pill bg-primary" id="catBadgeLive">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-semibold d-flex justify-content-center align-items-center gap-2"
+                                id="cat-tab-vod" data-bs-toggle="pill" data-bs-target="#cat-pane-vod" type="button" role="tab">
+                                <i class="fa-solid fa-film"></i> VOD Movies
+                                <span class="badge rounded-pill bg-success" id="catBadgeVod">0</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-semibold d-flex justify-content-center align-items-center gap-2"
+                                id="cat-tab-series" data-bs-toggle="pill" data-bs-target="#cat-pane-series" type="button" role="tab">
+                                <i class="fa-solid fa-clapperboard"></i> TV Series
+                                <span class="badge rounded-pill bg-info text-dark" id="catBadgeSeries">0</span>
+                            </button>
+                        </li>
+                    </ul>
+
+                    <!-- Search and Batch Actions Toolbar -->
+                    <div class="row g-2 align-items-center mb-3 p-2 bg-light rounded border">
+                        <div class="col-md-6 col-12">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                                <input type="text" class="form-control border-start-0" id="catSearchInput"
+                                    placeholder="Filter categories in view..." oninput="filterActiveCategoryList(this.value)">
+                                <button class="btn btn-outline-secondary" type="button" onclick="clearCatSearch()">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-12 text-md-end text-start">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-primary" onclick="bulkSelectCategories('all')" title="Select all categories in this tab">
+                                    <i class="fa-solid fa-check-double me-1"></i>All
+                                </button>
+                                <button type="button" class="btn btn-outline-success" onclick="bulkSelectCategories('recommended')" title="Auto-select categories that are not hidden by group rules">
+                                    <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Recommended
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="bulkSelectCategories('none')" title="Deselect all in this tab">
+                                    <i class="fa-solid fa-ban me-1"></i>None
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Category Tab Panes -->
+                    <div class="tab-content border rounded p-2" id="catTabContent" style="max-height: 380px; overflow-y: auto;">
+                        <div class="tab-pane fade show active" id="cat-pane-live" role="tabpanel" tabindex="0">
+                            <div id="catListLive" class="row g-2"></div>
+                        </div>
+                        <div class="tab-pane fade" id="cat-pane-vod" role="tabpanel" tabindex="0">
+                            <div id="catListVod" class="row g-2"></div>
+                        </div>
+                        <div class="tab-pane fade" id="cat-pane-series" role="tabpanel" tabindex="0">
+                            <div id="catListSeries" class="row g-2"></div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center mt-2 px-1">
+                        <small class="text-muted fs-8" id="catSelectionSummary">0 categories selected</small>
+                        <small class="text-muted fs-8">
+                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle me-1"><i class="fa-solid fa-eye-slash me-1"></i>Hidden by rule</span>
+                            Categories matching active hide rules are unchecked in 'Recommended'.
+                        </small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-top d-flex justify-content-between">
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="resetAllCategoriesToDefault()">
+                        <i class="fa-solid fa-rotate-left me-1"></i> Import Everything (Reset)
+                    </button>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm fw-semibold" id="btnSaveCategories" onclick="saveCategoryFilters(false)">
+                        <i class="fa-solid fa-floppy-disk me-1"></i> Save Selection
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm fw-semibold" id="btnSaveAndRefreshCategories" onclick="saveCategoryFilters(true)">
+                        <i class="fa-solid fa-arrows-rotate me-1"></i> Save & Refresh Source
+                    </button>
+                </div>
             </div>
         </div>
     </div>

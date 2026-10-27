@@ -16,6 +16,7 @@ class SourceBase(BaseModel):
     content_types: List[str] = ["live", "vod", "series"]
     priority: int = 10
     user_agent: Optional[str] = None
+    selected_categories: Optional[str] = None
     enabled: bool = True
 
     @field_validator("content_types", mode="before")
@@ -46,6 +47,7 @@ class SourceUpdate(BaseModel):
     content_types: Optional[List[str]] = None
     priority: Optional[int] = None
     user_agent: Optional[str] = None
+    selected_categories: Optional[str] = None
     enabled: Optional[bool] = None
 
     @field_validator("content_types", mode="before")

@@ -102,7 +102,19 @@ async def fetch_xtream(source: Source) -> IngestResult:
         "Accept-Encoding": "gzip, deflate",
     }
 
-    # Timeouts: user-configurable via SOURCE_TIMEOUT
+    # Parse selected categories filter if configured
+    selected_filter: Optional[Dict[str, List[str]]] = None
+    if source.selected_categories:
+        try:
+            parsed = json.loads(source.selected_categories)
+            if isinstance(parsed, dict):
+                selected_filter = {
+                    k: [str(cid) for cid in v]
+                    for k, v in parsed.items()
+                    if isinstance(v, list) and len(v) > 0
+                }
+        except Exception:
+            selected_filter = None
     from app.services.ingestion.manager import get_source_timeout
     src_timeout = get_source_timeout()
     timeout = httpx.Timeout(connect=min(15.0, src_timeout), read=src_timeout, write=15.0, pool=15.0)
@@ -170,32 +182,48 @@ async def fetch_xtream(source: Source) -> IngestResult:
                                 cid = str(cat.get("category_id"))
                                 category_map[cid] = cat.get("category_name", "Uncategorized")
 
-                    streams_resp = await client.get(
-                        f"{base_url}/player_api.php?username={username}&password={password}&action=get_live_streams"
-                    )
-                    if streams_resp.status_code == 200:
-                        streams = parse_fast_json(streams_resp)
-                        if isinstance(streams, list):
-                            for idx, item in enumerate(streams):
-                                if idx > 0 and idx % 1000 == 0:
-                                    await asyncio.sleep(0)
-                                stream_id = str(item.get("stream_id", ""))
-                                cat_id = str(item.get("category_id", ""))
-                                group_name = category_map.get(cat_id, "Uncategorized")
-                                name = item.get("name") or f"Channel {stream_id}"
-                                logo = item.get("stream_icon")
-                                epg_id = item.get("epg_channel_id")
-                                stream_url = f"{base_url}/live/{username}/{password}/{stream_id}.ts"
+                    live_allowed = selected_filter.get("live") if selected_filter else None
+                    if live_allowed and len(live_allowed) > 0:
+                        # Category-filtered fetch: fetch each selected category in parallel (up to 5 concurrent)
+                        sem = asyncio.Semaphore(5)
+                        async def _fetch_live_cat(cid: str):
+                            async with sem:
+                                url = f"{base_url}/player_api.php?username={username}&password={password}&action=get_live_streams&category_id={cid}"
+                                r = await client.get(url)
+                                return parse_fast_json(r) if r.status_code == 200 else []
 
-                                result.channels.append({
-                                    "source_id": source.id,
-                                    "source_stream_id": stream_id,
-                                    "raw_name": name,
-                                    "raw_group": group_name,
-                                    "logo_url": logo,
-                                    "epg_channel_id": epg_id,
-                                    "stream_url": stream_url,
-                                })
+                        cat_results = await asyncio.gather(*(_fetch_live_cat(c) for c in live_allowed), return_exceptions=True)
+                        streams = []
+                        for cr in cat_results:
+                            if isinstance(cr, list):
+                                streams.extend(cr)
+                    else:
+                        streams_resp = await client.get(
+                            f"{base_url}/player_api.php?username={username}&password={password}&action=get_live_streams"
+                        )
+                        streams = parse_fast_json(streams_resp) if streams_resp.status_code == 200 else []
+
+                    if isinstance(streams, list):
+                        for idx, item in enumerate(streams):
+                            if idx > 0 and idx % 1000 == 0:
+                                await asyncio.sleep(0)
+                            stream_id = str(item.get("stream_id", ""))
+                            cat_id = str(item.get("category_id", ""))
+                            group_name = category_map.get(cat_id, "Uncategorized")
+                            name = item.get("name") or f"Channel {stream_id}"
+                            logo = item.get("stream_icon")
+                            epg_id = item.get("epg_channel_id")
+                            stream_url = f"{base_url}/live/{username}/{password}/{stream_id}.ts"
+
+                            result.channels.append({
+                                "source_id": source.id,
+                                "source_stream_id": stream_id,
+                                "raw_name": name,
+                                "raw_group": group_name,
+                                "logo_url": logo,
+                                "epg_channel_id": epg_id,
+                                "stream_url": stream_url,
+                            })
                 except Exception as e:
                     logger.warning(f"Error fetching live streams for source {source.name}: {e}")
 
@@ -213,41 +241,57 @@ async def fetch_xtream(source: Source) -> IngestResult:
                                 cid = str(cat.get("category_id"))
                                 category_map[cid] = cat.get("category_name", "Uncategorized")
 
-                    streams_resp = await client.get(
-                        f"{base_url}/player_api.php?username={username}&password={password}&action=get_vod_streams"
-                    )
-                    if streams_resp.status_code == 200:
-                        streams = parse_fast_json(streams_resp)
-                        if isinstance(streams, list):
-                            for idx, item in enumerate(streams):
-                                if idx > 0 and idx % 1000 == 0:
-                                    await asyncio.sleep(0)
-                                stream_id = str(item.get("stream_id", ""))
-                                cat_id = str(item.get("category_id", ""))
-                                group_name = category_map.get(cat_id, "Uncategorized")
-                                name = item.get("name") or f"Movie {stream_id}"
-                                poster = item.get("stream_icon")
-                                container_ext = item.get("container_extension") or "mp4"
-                                rating_val = item.get("rating_5based") or item.get("rating")
-                                rating = None
-                                if rating_val is not None:
-                                    try:
-                                        rating = float(rating_val)
-                                    except (ValueError, TypeError):
-                                        rating = None
+                    vod_allowed = selected_filter.get("vod") if selected_filter else None
+                    if vod_allowed and len(vod_allowed) > 0:
+                        # Category-filtered fetch: fetch each selected category in parallel (up to 5 concurrent)
+                        sem = asyncio.Semaphore(5)
+                        async def _fetch_vod_cat(cid: str):
+                            async with sem:
+                                url = f"{base_url}/player_api.php?username={username}&password={password}&action=get_vod_streams&category_id={cid}"
+                                r = await client.get(url)
+                                return parse_fast_json(r) if r.status_code == 200 else []
 
-                                stream_url = f"{base_url}/movie/{username}/{password}/{stream_id}.{container_ext}"
+                        cat_results = await asyncio.gather(*(_fetch_vod_cat(c) for c in vod_allowed), return_exceptions=True)
+                        streams = []
+                        for cr in cat_results:
+                            if isinstance(cr, list):
+                                streams.extend(cr)
+                    else:
+                        streams_resp = await client.get(
+                            f"{base_url}/player_api.php?username={username}&password={password}&action=get_vod_streams"
+                        )
+                        streams = parse_fast_json(streams_resp) if streams_resp.status_code == 200 else []
 
-                                result.movies.append({
-                                    "source_id": source.id,
-                                    "source_stream_id": stream_id,
-                                    "raw_name": name,
-                                    "raw_group": group_name,
-                                    "poster_url": poster,
-                                    "rating": rating,
-                                    "container_ext": container_ext,
-                                    "stream_url": stream_url,
-                                })
+                    if isinstance(streams, list):
+                        for idx, item in enumerate(streams):
+                            if idx > 0 and idx % 1000 == 0:
+                                await asyncio.sleep(0)
+                            stream_id = str(item.get("stream_id", ""))
+                            cat_id = str(item.get("category_id", ""))
+                            group_name = category_map.get(cat_id, "Uncategorized")
+                            name = item.get("name") or f"Movie {stream_id}"
+                            poster = item.get("stream_icon")
+                            container_ext = item.get("container_extension") or "mp4"
+                            rating_val = item.get("rating_5based") or item.get("rating")
+                            rating = None
+                            if rating_val is not None:
+                                try:
+                                    rating = float(rating_val)
+                                except (ValueError, TypeError):
+                                    rating = None
+
+                            stream_url = f"{base_url}/movie/{username}/{password}/{stream_id}.{container_ext}"
+
+                            result.movies.append({
+                                "source_id": source.id,
+                                "source_stream_id": stream_id,
+                                "raw_name": name,
+                                "raw_group": group_name,
+                                "poster_url": poster,
+                                "rating": rating,
+                                "container_ext": container_ext,
+                                "stream_url": stream_url,
+                            })
                 except Exception as e:
                     logger.warning(f"Error fetching VOD for source {source.name}: {e}")
 
@@ -265,46 +309,62 @@ async def fetch_xtream(source: Source) -> IngestResult:
                                 cid = str(cat.get("category_id"))
                                 category_map[cid] = cat.get("category_name", "Uncategorized")
 
-                    series_resp = await client.get(
-                        f"{base_url}/player_api.php?username={username}&password={password}&action=get_series"
-                    )
-                    if series_resp.status_code == 200:
-                        series_list = parse_fast_json(series_resp)
-                        if isinstance(series_list, list):
-                            for idx, item in enumerate(series_list):
-                                if idx > 0 and idx % 1000 == 0:
-                                    await asyncio.sleep(0)
-                                series_id = str(item.get("series_id", ""))
-                                cat_id = str(item.get("category_id", ""))
-                                group_name = category_map.get(cat_id, "Uncategorized")
-                                name = item.get("name") or f"Series {series_id}"
-                                poster = item.get("cover")
-                                plot = item.get("plot")
-                                genre = item.get("genre")
-                                release_date = str(item.get("releaseDate") or item.get("year") or "")
-                                year = None
-                                if release_date and len(release_date) >= 4 and release_date[:4].isdigit():
-                                    year = int(release_date[:4])
+                    series_allowed = selected_filter.get("series") if selected_filter else None
+                    if series_allowed and len(series_allowed) > 0:
+                        # Category-filtered fetch: fetch each selected category in parallel (up to 5 concurrent)
+                        sem = asyncio.Semaphore(5)
+                        async def _fetch_series_cat(cid: str):
+                            async with sem:
+                                url = f"{base_url}/player_api.php?username={username}&password={password}&action=get_series&category_id={cid}"
+                                r = await client.get(url)
+                                return parse_fast_json(r) if r.status_code == 200 else []
 
-                                rating_val = item.get("rating_5based") or item.get("rating")
-                                rating = None
-                                if rating_val is not None:
-                                    try:
-                                        rating = float(rating_val)
-                                    except (ValueError, TypeError):
-                                        rating = None
+                        cat_results = await asyncio.gather(*(_fetch_series_cat(c) for c in series_allowed), return_exceptions=True)
+                        series_list = []
+                        for cr in cat_results:
+                            if isinstance(cr, list):
+                                series_list.extend(cr)
+                    else:
+                        series_resp = await client.get(
+                            f"{base_url}/player_api.php?username={username}&password={password}&action=get_series"
+                        )
+                        series_list = parse_fast_json(series_resp) if series_resp.status_code == 200 else []
 
-                                result.series.append({
-                                    "source_id": source.id,
-                                    "source_series_id": series_id,
-                                    "raw_name": name,
-                                    "raw_group": group_name,
-                                    "poster_url": poster,
-                                    "plot": plot,
-                                    "genre": genre,
-                                    "year": year,
-                                    "rating": rating,
-                                })
+                    if isinstance(series_list, list):
+                        for idx, item in enumerate(series_list):
+                            if idx > 0 and idx % 1000 == 0:
+                                await asyncio.sleep(0)
+                            series_id = str(item.get("series_id", ""))
+                            cat_id = str(item.get("category_id", ""))
+                            group_name = category_map.get(cat_id, "Uncategorized")
+                            name = item.get("name") or f"Series {series_id}"
+                            poster = item.get("cover")
+                            plot = item.get("plot")
+                            genre = item.get("genre")
+                            release_date = str(item.get("releaseDate") or item.get("year") or "")
+                            year = None
+                            if release_date and len(release_date) >= 4 and release_date[:4].isdigit():
+                                year = int(release_date[:4])
+
+                            rating_val = item.get("rating_5based") or item.get("rating")
+                            rating = None
+                            if rating_val is not None:
+                                try:
+                                    rating = float(rating_val)
+                                except (ValueError, TypeError):
+                                    rating = None
+
+                            result.series.append({
+                                "source_id": source.id,
+                                "source_series_id": series_id,
+                                "raw_name": name,
+                                "raw_group": group_name,
+                                "poster_url": poster,
+                                "plot": plot,
+                                "genre": genre,
+                                "year": year,
+                                "rating": rating,
+                            })
                 except Exception as e:
                     logger.warning(f"Error fetching series for source {source.name}: {e}")
 

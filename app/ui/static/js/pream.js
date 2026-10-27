@@ -322,10 +322,12 @@ function toggleEditSourceFields() {
     }
 }
 
-async function submitAddSource(e) {
-    e.preventDefault();
+async function submitAddSource(e, selectCategoriesAfter = false) {
+    if (e && e.preventDefault) e.preventDefault();
     const btn = document.getElementById('btnSaveSource');
+    const btnCat = document.getElementById('btnSaveAndSelectCategories');
     if (btn) btn.disabled = true;
+    if (btnCat) btnCat.disabled = true;
 
     const contentTypes = [];
     if (document.getElementById('ctLive').checked) contentTypes.push('live');
@@ -356,11 +358,23 @@ async function submitAddSource(e) {
             throw new Error(err.detail || 'Failed to save source');
         }
 
+        const newSource = await resp.json();
         showToast('Source added successfully!');
-        setTimeout(() => location.reload(), 600);
+
+        if (selectCategoriesAfter && newSource.type === 'xtream') {
+            const addModalEl = document.getElementById('addSourceModal');
+            if (addModalEl) {
+                const addModal = bootstrap.Modal.getInstance(addModalEl);
+                if (addModal) addModal.hide();
+            }
+            openCategoryFilterModal(newSource.id, newSource.name);
+        } else {
+            setTimeout(() => location.reload(), 600);
+        }
     } catch (err) {
         showToast(err.message, true);
         if (btn) btn.disabled = false;
+        if (btnCat) btnCat.disabled = false;
     }
 }
 
@@ -667,6 +681,336 @@ async function executeDeleteSource(id, name) {
     const row = document.getElementById(`sourceRow-${id}`);
     if (row) row.remove();
     else location.reload();
+}
+
+// ── Category Filter Modal State & Handlers ──
+let currentCategoryModalSourceId = null;
+let currentCategoryModalSourceName = null;
+let categoryModalData = {
+    live: [],
+    vod: [],
+    series: []
+};
+let categoryModalSelection = {
+    live: new Set(),
+    vod: new Set(),
+    series: new Set()
+};
+
+function openCategoriesFromEditModal() {
+    const editModalEl = document.getElementById('editSourceModal');
+    const id = document.getElementById('editSourceId')?.value;
+    const name = document.getElementById('editSourceName')?.value || `Source ${id}`;
+    if (!id) return;
+    if (editModalEl) {
+        const bsModal = bootstrap.Modal.getInstance(editModalEl);
+        if (bsModal) bsModal.hide();
+    }
+    openCategoryFilterModal(id, name);
+}
+
+async function openCategoryFilterModal(sourceId, sourceName) {
+    currentCategoryModalSourceId = sourceId;
+    currentCategoryModalSourceName = sourceName || `Source ${sourceId}`;
+
+    const modalEl = document.getElementById('categoryFilterModal');
+    if (!modalEl) return;
+
+    const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    bsModal.show();
+
+    const subtitleEl = document.getElementById('catModalSourceSubtitle');
+    if (subtitleEl) subtitleEl.textContent = `Source: ${currentCategoryModalSourceName} (ID: ${sourceId})`;
+
+    const loadingEl = document.getElementById('catModalLoading');
+    const contentEl = document.getElementById('catModalContent');
+    const searchInput = document.getElementById('catSearchInput');
+    if (searchInput) searchInput.value = '';
+
+    if (loadingEl) loadingEl.classList.remove('d-none');
+    if (contentEl) contentEl.classList.add('d-none');
+
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/categories`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to fetch categories from provider');
+        }
+
+        const data = await resp.json();
+        const cats = data.categories || {};
+        categoryModalData = {
+            live: cats.live || [],
+            vod: cats.vod || [],
+            series: cats.series || []
+        };
+
+        const saved = data.selected || null;
+        categoryModalSelection = {
+            live: new Set(),
+            vod: new Set(),
+            series: new Set()
+        };
+
+        ['live', 'vod', 'series'].forEach(type => {
+            const typeCats = categoryModalData[type];
+            if (saved && Array.isArray(saved[type])) {
+                // If saved filter exists, initialize with saved category IDs
+                saved[type].forEach(id => categoryModalSelection[type].add(String(id)));
+            } else {
+                // Default: intelligent preselection (recommended: all categories not hidden by rules)
+                typeCats.forEach(c => {
+                    if (c.recommended) {
+                        categoryModalSelection[type].add(String(c.id));
+                    }
+                });
+            }
+        });
+
+        renderCategoryTabs();
+        if (loadingEl) loadingEl.classList.add('d-none');
+        if (contentEl) contentEl.classList.remove('d-none');
+    } catch (err) {
+        if (loadingEl) {
+            loadingEl.innerHTML = `
+                <div class="alert alert-danger py-3 px-4 text-center">
+                    <i class="fa-solid fa-triangle-exclamation fs-3 mb-2 d-block"></i>
+                    <div class="fw-bold mb-1">Failed to load categories</div>
+                    <div class="fs-8 text-break">${err.message}</div>
+                </div>`;
+        }
+    }
+}
+
+function getActiveCategoryType() {
+    const activeTab = document.querySelector('#catTypeTabs .nav-link.active');
+    if (!activeTab) return 'live';
+    const id = activeTab.id;
+    if (id.includes('vod')) return 'vod';
+    if (id.includes('series')) return 'series';
+    return 'live';
+}
+
+function renderCategoryTabs() {
+    ['live', 'vod', 'series'].forEach(type => renderCategoryList(type));
+    updateCategoryBadgesAndSummary();
+}
+
+function renderCategoryList(type) {
+    const listEl = document.getElementById(`catList${type.charAt(0).toUpperCase() + type.slice(1)}`);
+    if (!listEl) return;
+
+    const items = categoryModalData[type] || [];
+    if (items.length === 0) {
+        listEl.innerHTML = `<div class="col-12 text-center text-muted py-4 fs-7">No categories found for this content type.</div>`;
+        return;
+    }
+
+    const query = (document.getElementById('catSearchInput')?.value || '').toLowerCase().trim();
+    const selectedSet = categoryModalSelection[type];
+
+    let html = '';
+    items.forEach(cat => {
+        const matchesSearch = !query || cat.name.toLowerCase().includes(query) || String(cat.id).includes(query);
+        const isChecked = selectedSet.has(String(cat.id));
+        const hiddenBadge = cat.hidden_by_rule
+            ? `<span class="badge bg-danger-subtle text-danger border border-danger-subtle ms-1 fs-9" title="Category matches a group hide rule"><i class="fa-solid fa-eye-slash"></i></span>`
+            : '';
+
+        html += `
+            <div class="col-md-6 col-12 cat-item-wrapper ${matchesSearch ? '' : 'd-none'}" data-name="${escapeHtml(cat.name.toLowerCase())}" data-id="${cat.id}">
+                <div class="p-2 border rounded bg-white h-100 d-flex align-items-center justify-content-between">
+                    <div class="form-check text-truncate pe-2">
+                        <input class="form-check-input cat-check" type="checkbox" id="catCheck_${type}_${cat.id}"
+                            value="${cat.id}" ${isChecked ? 'checked' : ''} onchange="toggleCategoryItem('${type}', '${cat.id}', this.checked)">
+                        <label class="form-check-label text-truncate fs-7 fw-medium" for="catCheck_${type}_${cat.id}" title="${escapeHtml(cat.name)} (ID: ${cat.id})">
+                            ${escapeHtml(cat.name)}
+                        </label>
+                    </div>
+                    <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                        ${hiddenBadge}
+                        <span class="badge bg-light text-secondary border font-monospace fs-9">#${cat.id}</span>
+                    </div>
+                </div>
+            </div>`;
+    });
+
+    listEl.innerHTML = html;
+}
+
+function toggleCategoryItem(type, catId, checked) {
+    if (checked) {
+        categoryModalSelection[type].add(String(catId));
+    } else {
+        categoryModalSelection[type].delete(String(catId));
+    }
+    updateCategoryBadgesAndSummary();
+}
+
+function filterActiveCategoryList(query) {
+    const currentType = getActiveCategoryType();
+    const q = (query || '').toLowerCase().trim();
+    const listEl = document.getElementById(`catList${currentType.charAt(0).toUpperCase() + currentType.slice(1)}`);
+    if (!listEl) return;
+
+    const items = listEl.querySelectorAll('.cat-item-wrapper');
+    items.forEach(el => {
+        const name = el.getAttribute('data-name') || '';
+        const id = el.getAttribute('data-id') || '';
+        if (!q || name.includes(q) || id.includes(q)) {
+            el.classList.remove('d-none');
+        } else {
+            el.classList.add('d-none');
+        }
+    });
+}
+
+function clearCatSearch() {
+    const input = document.getElementById('catSearchInput');
+    if (input) {
+        input.value = '';
+        filterActiveCategoryList('');
+    }
+}
+
+function bulkSelectCategories(mode) {
+    const currentType = getActiveCategoryType();
+    const items = categoryModalData[currentType] || [];
+    const set = categoryModalSelection[currentType];
+
+    if (mode === 'all') {
+        items.forEach(c => set.add(String(c.id)));
+    } else if (mode === 'none') {
+        set.clear();
+    } else if (mode === 'recommended') {
+        set.clear();
+        items.forEach(c => {
+            if (c.recommended) set.add(String(c.id));
+        });
+    }
+
+    renderCategoryList(currentType);
+    updateCategoryBadgesAndSummary();
+}
+
+function updateCategoryBadgesAndSummary() {
+    const liveCount = categoryModalSelection.live.size;
+    const liveTotal = categoryModalData.live.length;
+    const vodCount = categoryModalSelection.vod.size;
+    const vodTotal = categoryModalData.vod.length;
+    const seriesCount = categoryModalSelection.series.size;
+    const seriesTotal = categoryModalData.series.length;
+
+    const bLive = document.getElementById('catBadgeLive');
+    if (bLive) bLive.textContent = `${liveCount}/${liveTotal}`;
+
+    const bVod = document.getElementById('catBadgeVod');
+    if (bVod) bVod.textContent = `${vodCount}/${vodTotal}`;
+
+    const bSeries = document.getElementById('catBadgeSeries');
+    if (bSeries) bSeries.textContent = `${seriesCount}/${seriesTotal}`;
+
+    const totalSelected = liveCount + vodCount + seriesCount;
+    const totalAvailable = liveTotal + vodTotal + seriesTotal;
+
+    const summaryEl = document.getElementById('catSelectionSummary');
+    if (summaryEl) {
+        summaryEl.textContent = `Total selected: ${totalSelected} / ${totalAvailable} categories`;
+    }
+}
+
+async function resetAllCategoriesToDefault() {
+    if (!confirm('This will remove all category filters and set this source to import all categories from the provider. Proceed?')) {
+        return;
+    }
+    const sourceId = currentCategoryModalSourceId;
+    if (!sourceId) return;
+
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/categories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected: null })
+        });
+        if (!resp.ok) throw new Error('Failed to reset categories');
+
+        showToast('All category filters removed. Source will import everything.');
+        const modalEl = document.getElementById('categoryFilterModal');
+        if (modalEl) {
+            const bsModal = bootstrap.Modal.getInstance(modalEl);
+            if (bsModal) bsModal.hide();
+        }
+        setTimeout(() => location.reload(), 600);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+}
+
+async function saveCategoryFilters(refreshAfterSave = false) {
+    const sourceId = currentCategoryModalSourceId;
+    if (!sourceId) return;
+
+    const btn = document.getElementById(refreshAfterSave ? 'btnSaveAndRefreshCategories' : 'btnSaveCategories');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-1"></i> Saving...`;
+    }
+
+    const payload = {
+        selected: {
+            live: Array.from(categoryModalSelection.live),
+            vod: Array.from(categoryModalSelection.vod),
+            series: Array.from(categoryModalSelection.series)
+        }
+    };
+
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/categories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to save category filters');
+        }
+
+        showToast('Category filters saved successfully!');
+
+        const modalEl = document.getElementById('categoryFilterModal');
+        if (modalEl) {
+            const bsModal = bootstrap.Modal.getInstance(modalEl);
+            if (bsModal) bsModal.hide();
+        }
+
+        if (refreshAfterSave) {
+            await fetch(`/api/sources/${sourceId}/refresh`, { method: 'POST' });
+            showToast('Source refresh started in background with category filters applied!');
+            updateFooterTaskProgress();
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            setTimeout(() => location.reload(), 600);
+        }
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 async function triggerRefreshSource(id, btn) {

@@ -2,6 +2,7 @@
 Source management API router.
 Provides CRUD endpoints and refresh triggers for IPTV sources.
 """
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -219,6 +220,7 @@ def create_source(source_in: SourceCreate, db: Session = Depends(get_db)):
         content_types=content_types_json,
         priority=source_in.priority,
         user_agent=source_in.user_agent,
+        selected_categories=source_in.selected_categories,
         enabled=source_in.enabled,
     )
     db.add(db_source)
@@ -294,3 +296,110 @@ def delete_source(source_id: int, db: Session = Depends(get_db)):
     db.delete(source)
     db.commit()
     return None
+
+
+@router.get("/{source_id}/categories")
+async def get_source_categories(
+    source_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch all categories (Live, VOD, Series) from an upstream source,
+    and compute suggested selection based on active hide rules.
+    """
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if source.type.lower() != "xtream":
+        return {
+            "source_id": source.id,
+            "type": source.type,
+            "message": "Category selection is only available for Xtream Codes sources.",
+            "categories": {"live": [], "vod": [], "series": []},
+            "selected": None,
+        }
+
+    from app.models.rule import Rule
+    from app.services.rules_engine import compile_rules, apply_rules_to_item_chain, is_group_by_source_enabled
+    from app.services.ingestion.xtream import parse_fast_json
+
+    base_url = clean_base_url(source.url)
+    username = source.username or ""
+    password = source.password or ""
+    ua = get_user_agent(source.user_agent)
+    headers = {"User-Agent": ua, "Accept": "*/*", "Accept-Encoding": "gzip, deflate"}
+    timeout = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
+
+    active_rules = db.query(Rule).filter(Rule.enabled == True).order_by(Rule.order.asc()).all()
+    compiled_rules = compile_rules(active_rules)
+    group_prefix = is_group_by_source_enabled(db)
+
+    categories = {"live": [], "vod": [], "series": []}
+    async with httpx.AsyncClient(headers=headers, timeout=timeout, follow_redirects=True) as client:
+        # Fetch live, vod, series categories in parallel
+        actions = [
+            ("live", f"{base_url}/player_api.php?username={username}&password={password}&action=get_live_categories"),
+            ("vod", f"{base_url}/player_api.php?username={username}&password={password}&action=get_vod_categories"),
+            ("series", f"{base_url}/player_api.php?username={username}&password={password}&action=get_series_categories"),
+        ]
+        resps = await asyncio.gather(*(client.get(url) for _, url in actions), return_exceptions=True)
+
+        for (ctype, _), resp in zip(actions, resps):
+            if isinstance(resp, Exception) or getattr(resp, "status_code", 0) != 200:
+                continue
+            cat_list = parse_fast_json(resp)
+            if isinstance(cat_list, list):
+                for cat in cat_list:
+                    cid = str(cat.get("category_id"))
+                    cname = str(cat.get("category_name", "")).strip() or f"Category {cid}"
+                    # Intelligent pre-selection: test whether rules would hide this category
+                    _, _, is_hidden = apply_rules_to_item_chain(
+                        ctype, "test", cname, source.name, group_prefix, compiled_rules
+                    )
+                    categories[ctype].append({
+                        "id": cid,
+                        "name": cname,
+                        "hidden_by_rule": is_hidden,
+                        "recommended": not is_hidden,
+                    })
+
+    # Parse currently selected categories if already set
+    saved_selected = None
+    if source.selected_categories:
+        try:
+            saved_selected = json.loads(source.selected_categories)
+        except Exception:
+            saved_selected = None
+
+    return {
+        "source_id": source.id,
+        "source_name": source.name,
+        "type": source.type,
+        "categories": categories,
+        "selected": saved_selected,
+    }
+
+
+@router.post("/{source_id}/categories")
+def save_source_categories(
+    source_id: int,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+):
+    """
+    Save category selections for a source.
+    If payload has selected == null or empty, all categories will be imported.
+    """
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    selected = payload.get("selected")
+    if selected is None:
+        source.selected_categories = None
+    else:
+        source.selected_categories = json.dumps(selected)
+
+    db.commit()
+    return {"status": "ok", "message": "Category filters saved successfully.", "selected": selected}

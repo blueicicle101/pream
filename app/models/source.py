@@ -16,6 +16,7 @@ class Source(Base):
     username = Column(String(255), nullable=True)  # Xtream only
     password = Column(String(255), nullable=True)  # Xtream only
     content_types = Column(Text, nullable=False, default='["live","vod","series"]')  # JSON array
+    selected_categories = Column(Text, nullable=True)  # JSON object: {"live": ["id1", ...], "vod": [...], "series": [...]} or null for all
     priority = Column(Integer, nullable=False, default=10)  # Lower = preferred
     user_agent = Column(Text, nullable=True)  # Optional sticky UA; NULL = random per refresh
     expiry_date = Column(String(50), nullable=True)  # Unix timestamp or date string from provider
@@ -59,6 +60,20 @@ class Source(Base):
         if not self.max_connections or self.max_connections in ("0", "null", "None"):
             return "Unlimited"
         return f"{self.max_connections} conn"
+
+    @property
+    def has_category_filter(self) -> bool:
+        """Return True if custom category selection is configured and non-empty."""
+        if not self.selected_categories:
+            return False
+        try:
+            import json
+            data = json.loads(self.selected_categories)
+            if not isinstance(data, dict):
+                return False
+            return any(bool(data.get(k)) for k in ("live", "vod", "series"))
+        except Exception:
+            return False
 
     def __repr__(self):
         return f"<Source(id={self.id}, name='{self.name}', type='{self.type}')>"
