@@ -67,7 +67,7 @@ class Settings(BaseSettings):
 
     # ── Server ──
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 8055
     SERVER_NAME: str = "Pream"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

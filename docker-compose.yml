@@ -5,7 +5,7 @@ services:
     container_name: pream
     restart: unless-stopped
     ports:
-      - "8055:8000"
+      - "8055:8055"
     volumes:
       - ./data:/app/data:Z
     env_file:
