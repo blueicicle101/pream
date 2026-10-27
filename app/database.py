@@ -2,10 +2,27 @@
 Database engine, session, and base model for SQLAlchemy ORM.
 Uses SQLite with check_same_thread=False for APScheduler thread safety.
 """
+import logging
+import time
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger("app.database.sql")
+
+# SQL Query Timing Cache (updated at runtime when settings change)
+_sql_timing_enabled: bool = settings.SQL_TIMING_ENABLED
+_sql_timing_threshold_ms: float = settings.SQL_TIMING_THRESHOLD_MS
+
+
+def update_sql_timing_settings(enabled: bool, threshold_ms: float = 10.0) -> None:
+    """Dynamically update verbose SQL query logging configuration."""
+    global _sql_timing_enabled, _sql_timing_threshold_ms
+    _sql_timing_enabled = enabled
+    _sql_timing_threshold_ms = threshold_ms
+
 
 # SQLite-specific: allow multi-threaded access and robust busy timeout
 connect_args = {}
@@ -18,6 +35,27 @@ engine = create_engine(
     connect_args=connect_args,
     echo=False,
 )
+
+# Lightweight event hooks for timing SQL operations without measurable skew
+@event.listens_for(engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    if _sql_timing_enabled:
+        conn.info.setdefault("query_start_time", []).append(time.perf_counter())
+
+
+@event.listens_for(engine, "after_cursor_execute")
+def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    if _sql_timing_enabled:
+        timers = conn.info.get("query_start_time")
+        if timers:
+            elapsed_ms = (time.perf_counter() - timers.pop()) * 1000.0
+            if elapsed_ms >= _sql_timing_threshold_ms:
+                # Truncate statement for neat log readability if very long
+                stmt_clean = " ".join(statement.split())
+                if len(stmt_clean) > 200:
+                    stmt_clean = stmt_clean[:197] + "..."
+                logger.warning(f"[SLOW SQL {elapsed_ms:.2f}ms] {stmt_clean}")
+
 
 if settings.DATABASE_URL.startswith("sqlite"):
     @event.listens_for(engine, "connect")
@@ -102,6 +140,18 @@ def init_db(target_engine=None):
     eng = target_engine or engine
     Base.metadata.create_all(bind=eng)
     _migrate_sqlite_schema(eng)
+
+    # Initialize SQL timing configuration from persisted settings
+    try:
+        from app.models.setting import Setting
+        with SessionLocal() as db:
+            s_en = db.query(Setting).filter(Setting.key == "sql_timing_enabled").first()
+            s_th = db.query(Setting).filter(Setting.key == "sql_timing_threshold_ms").first()
+            en = (s_en.value.lower() == "true") if s_en else settings.SQL_TIMING_ENABLED
+            th = float(s_th.value) if s_th else settings.SQL_TIMING_THRESHOLD_MS
+            update_sql_timing_settings(en, th)
+    except Exception:
+        pass
 
 
 # Run lightweight migration on import if SQLite database already exists

@@ -348,6 +348,12 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     refresh_cron_setting = db.query(Setting).filter(Setting.key == "refresh_cron").first()
     refresh_cron = refresh_cron_setting.value if refresh_cron_setting else settings.REFRESH_CRON
 
+    sql_timing_setting = db.query(Setting).filter(Setting.key == "sql_timing_enabled").first()
+    sql_timing_enabled = (sql_timing_setting.value.lower() == "true") if sql_timing_setting else settings.SQL_TIMING_ENABLED
+
+    sql_threshold_setting = db.query(Setting).filter(Setting.key == "sql_timing_threshold_ms").first()
+    sql_timing_threshold_ms = float(sql_threshold_setting.value) if sql_threshold_setting else settings.SQL_TIMING_THRESHOLD_MS
+
     from app.services.stream_health import get_stream_health_config
     stream_health_enabled, stream_health_count = get_stream_health_config(db)
 
@@ -376,6 +382,8 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "source_scan_threads": source_scan_threads,
             "source_timeout": source_timeout,
             "refresh_cron": refresh_cron,
+            "sql_timing_enabled": sql_timing_enabled,
+            "sql_timing_threshold_ms": sql_timing_threshold_ms,
             "stream_health": stream_health_enabled,
             "stream_health_count": stream_health_count,
             "stream_failover": stream_failover,
@@ -412,12 +420,15 @@ def update_settings(
     telegram_chat_id: Optional[str] = Form(""),
     refresh_cron_enabled: Optional[str] = Form(None),
     refresh_cron: Optional[str] = Form("0 4 * * *"),
+    sql_timing_enabled: Optional[str] = Form(None),
+    sql_timing_threshold_ms: Optional[str] = Form("10.0"),
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ):
     """Save runtime settings to SQLite."""
     gbs_val = "true" if group_by_source else "false"
     cron_en_val = "true" if refresh_cron_enabled else "false"
+    sql_t_en_val = "true" if sql_timing_enabled else "false"
     tg_en_val = "true" if telegram_enabled else "false"
     gem_en_val = "true" if gemini_enabled else "false"
     sh_val = "true" if stream_health else "false"
@@ -446,11 +457,17 @@ def update_settings(
         sh_count = str(max(1, min(5, int(stream_health_count or 4))))
     except ValueError:
         sh_count = "4"
+    try:
+        sql_thresh_val = str(max(1.0, float(sql_timing_threshold_ms or 10.0)))
+    except ValueError:
+        sql_thresh_val = "10.0"
 
     pairs = [
         ("group_by_source", gbs_val),
         ("source_scan_threads", sst_val),
         ("source_timeout", sto_val),
+        ("sql_timing_enabled", sql_t_en_val),
+        ("sql_timing_threshold_ms", sql_thresh_val),
         ("refresh_cron_enabled", cron_en_val),
         ("telegram_enabled", tg_en_val),
         ("gemini_enabled", gem_en_val),
@@ -479,6 +496,13 @@ def update_settings(
             setting.value = val
 
     db.commit()
+
+    from app.database import update_sql_timing_settings
+    update_sql_timing_settings(
+        enabled=(sql_t_en_val == "true"),
+        threshold_ms=float(sql_thresh_val)
+    )
+
     return RedirectResponse(url="/settings?saved=1", status_code=303)
 
 

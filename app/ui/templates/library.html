@@ -42,9 +42,11 @@
                     <span class="text-truncate">
                         <i class="fa-solid fa-border-all me-2 opacity-75"></i> All Categories
                     </span>
-                    <span class="badge {% if not current_group %}bg-primary text-white{% else %}bg-light text-secondary border{% endif %} rounded-pill fs-8">
+                    {% if not current_group %}
+                    <span class="badge bg-primary text-white rounded-pill fs-8">
                         {{ total_count }}
                     </span>
+                    {% endif %}
                 </a>
 
                 {% for g in groups %}
@@ -126,6 +128,7 @@
                 {% if current_group %}
                 <span class="badge bg-white text-primary border shadow-sm d-flex align-items-center gap-1 py-1 px-2">
                     <i class="fa-regular fa-folder"></i> {{ current_group }}
+                    <span class="badge bg-primary-subtle text-primary ms-1 px-1 rounded">{{ total_count }} items</span>
                     <a href="/library?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}" class="text-secondary text-decoration-none ms-1 hover-dark" title="Clear category filter">&times;</a>
                 </span>
                 {% endif %}

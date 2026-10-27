@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # ── Database ──
     DATABASE_URL: str = "sqlite:///./data/pream.db"
+    SQL_TIMING_ENABLED: bool = False  # Log slow SQL queries with execution time
+    SQL_TIMING_THRESHOLD_MS: float = 10.0  # Threshold in ms to trigger slow query logging
 
     # ── Scheduler ──
     REFRESH_CRON_ENABLED: bool = True  # Master switch for automated cron schedule
