@@ -1067,12 +1067,13 @@ async function triggerCancelAll(btn) {
     }
 
     try {
-        // Cancel both source refreshes and TMDB enrichment
-        const [resp1, resp2] = await Promise.allSettled([
+        // Cancel source refreshes, TMDB enrichment, and rules application
+        const [resp1, resp2, resp3] = await Promise.allSettled([
             fetch('/api/sources/cancel-refresh', { method: 'POST' }),
             fetch('/api/tmdb/cancel', { method: 'POST' }),
+            fetch('/api/rules/cancel', { method: 'POST' }),
         ]);
-        showToast('Cancellation requested for active tasks and enrichment.');
+        showToast('Cancellation requested for active tasks, rules, and enrichment.');
         updateFooterTaskProgress();
     } catch (err) {
         showToast(err.message, true);

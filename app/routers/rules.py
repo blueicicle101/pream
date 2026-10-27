@@ -123,6 +123,14 @@ def trigger_apply_rules(db: Session = Depends(get_db)):
     return stats
 
 
+@router.post("/cancel")
+def trigger_cancel_rules():
+    """Cancel currently running library rule application."""
+    from app.services.rules_engine import request_rules_cancellation
+    request_rules_cancellation()
+    return {"status": "ok", "message": "Rule application cancellation requested"}
+
+
 class QuickGroupActionRequest(BaseModel):
     group_name: str
     content_type: str = "all"  # "all", "live", "vod", "series"

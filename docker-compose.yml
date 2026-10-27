@@ -12,6 +12,14 @@ services:
     env_file:
       - path: .env
         required: false
+    deploy:
+      resources:
+        limits:
+          cpus: '${PREAM_CPU_LIMIT:-2.0}'
+          memory: '${PREAM_MEMORY_LIMIT:-2048M}'
+        reservations:
+          cpus: '${PREAM_CPU_RESERVATION:-0.5}'
+          memory: '${PREAM_MEMORY_RESERVATION:-512M}'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 2m

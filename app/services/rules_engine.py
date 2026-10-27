@@ -21,6 +21,27 @@ from app.services.task_status import set_task_status
 
 logger = logging.getLogger(__name__)
 
+# Cancellation flag for rule application
+_rules_cancel_requested: bool = False
+
+
+def request_rules_cancellation() -> None:
+    """Request immediate cancellation of active library rule application."""
+    global _rules_cancel_requested
+    _rules_cancel_requested = True
+
+
+def is_rules_cancelled() -> bool:
+    """Check if cancellation has been requested for rule application."""
+    global _rules_cancel_requested
+    return _rules_cancel_requested
+
+
+def reset_rules_cancellation() -> None:
+    """Reset cancellation state before running rule application."""
+    global _rules_cancel_requested
+    _rules_cancel_requested = False
+
 
 def is_group_by_source_enabled(db: Session) -> bool:
     """Check if group_by_source is enabled in DB settings or .env config."""
@@ -218,12 +239,14 @@ def compile_rules(rules: List[Rule]) -> List[Tuple[Rule, re.Pattern]]:
     return compiled_list
 
 
-def apply_all_rules_to_library(db: Session) -> Dict[str, Any]:
+def apply_all_rules_to_library(db: Session, batch_size: int = 10000) -> Dict[str, Any]:
     """
     Reapply all active rules across the entire library in SQLite.
-    Tracks affected counts per rule and updates task status.
+    Optimized with batch updates and regular commits to avoid locking SQLite.
+    Supports real-time incremental progress reporting and cancellation.
     """
-    set_task_status("running", "Applying Rules", "Applying transformation rules across library...", 15)
+    reset_rules_cancellation()
+    set_task_status("running", "Applying Rules", "Preparing transformation rules...", 5)
 
     rules = db.query(Rule).filter(Rule.enabled == True).order_by(Rule.order.asc()).all()
     compiled_rules = compile_rules(rules)
@@ -235,86 +258,119 @@ def apply_all_rules_to_library(db: Session) -> Dict[str, Any]:
     sources = db.query(Source).all()
     source_map = {s.id: s.name for s in sources}
 
-    # 1. Process Channels (Live)
-    channels = db.query(Channel).all()
-    hidden_channels = 0
-    for ch in channels:
-        s_name = source_map.get(ch.source_id, "")
-        d_name, d_grp, hid = apply_rules_to_item_chain(
-            "live", ch.raw_name, ch.raw_group, s_name, group_prefix, compiled_rules, rule_counters
-        )
-        ch.display_name = d_name
-        ch.display_group = d_grp
-        ch.is_hidden = hid
-        if hid:
-            hidden_channels += 1
-
-    set_task_status("running", "Applying Rules", f"Processed {len(channels)} Live channels. Processing VOD...", 50)
-
-    # 2. Process Movies (VOD)
     from app.services.tmdb import is_tmdb_auto_group_enabled, GENRE_MAP, detect_language_code
     auto_group_enabled = is_tmdb_auto_group_enabled(db)
 
-    movies = db.query(Movie).all()
-    hidden_movies = 0
-    for mv in movies:
-        s_name = source_map.get(mv.source_id, "")
-        d_name, d_grp, hid = apply_rules_to_item_chain(
-            "vod", mv.raw_name, mv.raw_group, s_name, group_prefix, compiled_rules, rule_counters
-        )
-        mv.display_name = d_name
-        # If movie was enriched and auto-group is enabled and no explicit group rule altered it, preserve TMDB genre group
-        if auto_group_enabled and mv.genre and mv.tmdb_id:
-            first_genre = mv.genre.split(",")[0].strip()
-            lang = detect_language_code(mv.raw_group or d_grp)
-            mv.display_group = f"{lang} | {first_genre}"
-        else:
-            mv.display_group = d_grp
-        mv.is_hidden = hid
-        if hid:
-            hidden_movies += 1
+    # 1. Channels (Live TV)
+    total_channels = db.query(Channel).count()
+    channels_processed = 0
+    hidden_channels = 0
 
-    # 3. Process Series
-    series_list = db.query(Series).all()
+    for offset in range(0, total_channels, batch_size):
+        if is_rules_cancelled():
+            break
+        chunk = db.query(Channel).offset(offset).limit(batch_size).all()
+        for ch in chunk:
+            s_name = source_map.get(ch.source_id, "")
+            d_name, d_grp, hid = apply_rules_to_item_chain(
+                "live", ch.raw_name, ch.raw_group, s_name, group_prefix, compiled_rules, rule_counters
+            )
+            ch.display_name = d_name
+            ch.display_group = d_grp
+            ch.is_hidden = hid
+            if hid:
+                hidden_channels += 1
+            channels_processed += 1
+        db.commit()
+        pct = max(5, min(25, int((channels_processed / max(1, total_channels)) * 25)))
+        set_task_status("running", "Applying Rules", f"Processing Live Channels ({channels_processed:,}/{total_channels:,})...", pct)
+
+    # 2. Movies (VOD)
+    total_movies = db.query(Movie).count()
+    movies_processed = 0
+    hidden_movies = 0
+
+    if not is_rules_cancelled():
+        for offset in range(0, total_movies, batch_size):
+            if is_rules_cancelled():
+                break
+            chunk = db.query(Movie).offset(offset).limit(batch_size).all()
+            for mv in chunk:
+                s_name = source_map.get(mv.source_id, "")
+                d_name, d_grp, hid = apply_rules_to_item_chain(
+                    "vod", mv.raw_name, mv.raw_group, s_name, group_prefix, compiled_rules, rule_counters
+                )
+                mv.display_name = d_name
+                if auto_group_enabled and mv.genre and mv.tmdb_id:
+                    first_genre = mv.genre.split(",")[0].strip()
+                    lang = detect_language_code(mv.raw_group or d_grp)
+                    mv.display_group = f"{lang} | {first_genre}"
+                else:
+                    mv.display_group = d_grp
+                mv.is_hidden = hid
+                if hid:
+                    hidden_movies += 1
+                movies_processed += 1
+            db.commit()
+            pct = 25 + max(1, min(50, int((movies_processed / max(1, total_movies)) * 50)))
+            set_task_status("running", "Applying Rules", f"Processing VOD Movies ({movies_processed:,}/{total_movies:,})...", pct)
+
+    # 3. TV Series
+    total_series = db.query(Series).count()
+    series_processed = 0
     hidden_series = 0
-    for sr in series_list:
-        s_name = source_map.get(sr.source_id, "")
-        d_name, d_grp, hid = apply_rules_to_item_chain(
-            "series", sr.raw_name, sr.raw_group, s_name, group_prefix, compiled_rules, rule_counters
-        )
-        sr.display_name = d_name
-        if auto_group_enabled and sr.genre and sr.tmdb_id:
-            first_genre = sr.genre.split(",")[0].strip()
-            lang = detect_language_code(sr.raw_group or d_grp)
-            sr.display_group = f"{lang} | {first_genre}"
-        else:
-            sr.display_group = d_grp
-        sr.is_hidden = hid
-        if hid:
-            hidden_series += 1
+
+    if not is_rules_cancelled():
+        for offset in range(0, total_series, batch_size):
+            if is_rules_cancelled():
+                break
+            chunk = db.query(Series).offset(offset).limit(batch_size).all()
+            for sr in chunk:
+                s_name = source_map.get(sr.source_id, "")
+                d_name, d_grp, hid = apply_rules_to_item_chain(
+                    "series", sr.raw_name, sr.raw_group, s_name, group_prefix, compiled_rules, rule_counters
+                )
+                sr.display_name = d_name
+                if auto_group_enabled and sr.genre and sr.tmdb_id:
+                    first_genre = sr.genre.split(",")[0].strip()
+                    lang = detect_language_code(sr.raw_group or d_grp)
+                    sr.display_group = f"{lang} | {first_genre}"
+                else:
+                    sr.display_group = d_grp
+                sr.is_hidden = hid
+                if hid:
+                    hidden_series += 1
+                series_processed += 1
+            db.commit()
+            pct = 75 + max(1, min(24, int((series_processed / max(1, total_series)) * 24)))
+            set_task_status("running", "Applying Rules", f"Processing TV Series ({series_processed:,}/{total_series:,})...", pct)
+
+    was_cancelled = is_rules_cancelled()
 
     # Update affected count on each rule in DB
     for r in rules:
         r.affected_count = rule_counters.get(r.id, 0)
-
     db.commit()
 
     total_hidden = hidden_channels + hidden_movies + hidden_series
-    set_task_status(
-        "completed",
-        "Complete",
-        f"Rules applied: {total_hidden} items hidden, {len(compiled_rules)} rules executed",
-        100,
-    )
+    if was_cancelled:
+        set_task_status("cancelled", "Cancelled", f"Rules application cancelled by user ({channels_processed + movies_processed + series_processed:,} items processed)", 0)
+    else:
+        set_task_status(
+            "completed",
+            "Complete",
+            f"Rules applied: {total_hidden:,} items hidden, {len(compiled_rules)} rules executed",
+            100,
+        )
 
     return {
-        "status": "ok",
+        "status": "cancelled" if was_cancelled else "ok",
         "rules_count": len(compiled_rules),
-        "channels_processed": len(channels),
+        "channels_processed": channels_processed,
         "channels_hidden": hidden_channels,
-        "movies_processed": len(movies),
+        "movies_processed": movies_processed,
         "movies_hidden": hidden_movies,
-        "series_processed": len(series_list),
+        "series_processed": series_processed,
         "series_hidden": hidden_series,
         "rule_affected": rule_counters,
     }
