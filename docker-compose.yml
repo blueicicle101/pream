@@ -4,8 +4,9 @@ services:
     image: pream:latest
     container_name: pream
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # ports:
+    #   - "8000:8000"
+    network_mode: host
     volumes:
       - ./data:/app/data:Z
     env_file:
