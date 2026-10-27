@@ -100,23 +100,6 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
     total_series = db.query(Series).count()
     total_all_streams = total_channels + total_movies + total_series
 
-    # Potential failovers count: channels & movies with matching display_name across >1 distinct sources
-    failover_channels = (
-        db.query(func.lower(Channel.display_name))
-        .filter(Channel.is_hidden == False)
-        .group_by(func.lower(Channel.display_name))
-        .having(func.count(func.distinct(Channel.source_id)) > 1)
-        .count()
-    )
-    failover_movies = (
-        db.query(func.lower(Movie.display_name))
-        .filter(Movie.is_hidden == False)
-        .group_by(func.lower(Movie.display_name))
-        .having(func.count(func.distinct(Movie.source_id)) > 1)
-        .count()
-    )
-    potential_failovers_count = failover_channels + failover_movies
-
     # Check for first login onboarding
     onboarding_setting = db.query(Setting).filter(Setting.key == "onboarding_completed").first()
     first_login = (onboarding_setting is None) and (len(sources) == 0)
@@ -163,7 +146,6 @@ def page_dashboard(request: Request, db: Session = Depends(get_db), admin: str =
             "series_count": series_count,
             "total_series": total_series,
             "total_all_streams": total_all_streams,
-            "potential_failovers_count": potential_failovers_count,
             "enriched_movies_count": enriched_movies_count,
             "enriched_series_count": enriched_series_count,
             "total_enriched_count": total_enriched_count,
