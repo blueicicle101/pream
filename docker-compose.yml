@@ -5,14 +5,14 @@ services:
     container_name: pream
     restart: unless-stopped
     ports:
-      - "8055:8055"
+      - "8000:8000"
     volumes:
       - ./data:/app/data:Z
     env_file:
       - path: .env
         required: false
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8055/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 2m
       timeout: 15s
       retries: 3
