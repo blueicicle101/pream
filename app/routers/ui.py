@@ -340,7 +340,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     from app.services.tmdb import is_tmdb_enabled, get_tmdb_rate_limit, is_tmdb_auto_group_enabled
     from app.services.gemini import get_gemini_api_key, is_staggered_gemini_calls_enabled, get_gemini_rate_delay, is_gemini_enabled
     from app.services.notifications import is_telegram_enabled
-    from app.services.ingestion.manager import get_source_scan_threads
+    from app.services.ingestion.manager import get_source_scan_threads, get_source_timeout
     from app.scheduler.scheduler import is_refresh_cron_enabled
     tmdb_enabled = is_tmdb_enabled(db)
     tmdb_auto_group = is_tmdb_auto_group_enabled(db)
@@ -352,6 +352,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     telegram_enabled = is_telegram_enabled(db)
     refresh_cron_enabled = is_refresh_cron_enabled()
     source_scan_threads = get_source_scan_threads(db)
+    source_timeout = get_source_timeout(db)
 
     tmdb_key_setting = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
     tmdb_api_key = tmdb_key_setting.value if tmdb_key_setting else settings.TMDB_API_KEY
@@ -391,6 +392,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "gemini_enabled": gemini_enabled,
             "refresh_cron_enabled": refresh_cron_enabled,
             "source_scan_threads": source_scan_threads,
+            "source_timeout": source_timeout,
             "refresh_cron": refresh_cron,
             "stream_health": stream_health_enabled,
             "stream_health_count": stream_health_count,
@@ -410,6 +412,7 @@ def update_settings(
     request: Request,
     group_by_source: Optional[str] = Form(None),
     source_scan_threads: Optional[str] = Form("1"),
+    source_timeout: Optional[str] = Form("60.0"),
     stream_health: Optional[str] = Form(None),
     stream_health_count: Optional[str] = Form("4"),
     stream_failover: Optional[str] = Form(None),
@@ -446,6 +449,10 @@ def update_settings(
     except ValueError:
         sst_val = "1"
     try:
+        sto_val = str(max(5.0, float(source_timeout or 60.0)))
+    except ValueError:
+        sto_val = "60.0"
+    try:
         tmdb_rl_val = str(max(0.0, float(tmdb_rate_limit or 0.05)))
     except ValueError:
         tmdb_rl_val = "0.05"
@@ -461,6 +468,7 @@ def update_settings(
     pairs = [
         ("group_by_source", gbs_val),
         ("source_scan_threads", sst_val),
+        ("source_timeout", sto_val),
         ("refresh_cron_enabled", cron_en_val),
         ("telegram_enabled", tg_en_val),
         ("gemini_enabled", gem_en_val),

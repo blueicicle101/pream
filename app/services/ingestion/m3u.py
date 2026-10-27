@@ -140,8 +140,10 @@ async def fetch_m3u(source: Source) -> IngestResult:
     headers = {
         "User-Agent": ua,
         "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
     }
-    src_timeout = getattr(settings, "SOURCE_TIMEOUT", 60.0) or 60.0
+    from app.services.ingestion.manager import get_source_timeout
+    src_timeout = get_source_timeout()
     timeout = httpx.Timeout(connect=min(15.0, src_timeout), read=src_timeout, write=15.0, pool=15.0)
 
     try:

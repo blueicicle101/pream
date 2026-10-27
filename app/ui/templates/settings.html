@@ -157,7 +157,7 @@
                             categories.
                         </div>
                     </div>
-                    <div class="mb-2">
+                    <div class="mb-3">
                         <label class="form-label fw-semibold text-dark">Source Scan Concurrency (Threads)</label>
                         <select class="form-select form-select-sm" style="max-width: 180px;" name="source_scan_threads">
                             <option value="1" {% if source_scan_threads == 1 %}selected{% endif %}>1 Thread (Recommended)</option>
@@ -165,6 +165,13 @@
                         </select>
                         <div class="form-text text-muted">
                             Controls parallel worker threads for source ingestion. Keeping this at 1 ensures minimal memory footprint and zero UI freezing on low-vCPU VPS instances.
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold text-dark">Source Request Timeout (seconds)</label>
+                        <input type="number" step="5" min="5" max="300" class="form-control form-control-sm font-monospace" style="max-width: 180px;" name="source_timeout" value="{{ source_timeout }}">
+                        <div class="form-text text-muted">
+                            Timeout in seconds for provider HTTP downloads and Xtream API calls (default: <code>60.0s</code>).
                         </div>
                     </div>
                 </div>

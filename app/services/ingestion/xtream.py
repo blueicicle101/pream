@@ -3,6 +3,7 @@ Xtream Codes API fetcher for Pream.
 Connects to upstream Xtream Codes servers, authenticates, and retrieves
 Live TV channels, VOD movies, and TV Series with categories and metadata.
 """
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -10,6 +11,30 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+
+def parse_fast_json(resp: Any) -> Any:
+    """Fast JSON parsing using orjson with fallback to resp.json() / json.loads."""
+    if hasattr(resp, "content") and resp.content:
+        try:
+            import orjson
+            return orjson.loads(resp.content)
+        except Exception:
+            pass
+    if hasattr(resp, "json"):
+        try:
+            return resp.json()
+        except Exception:
+            pass
+    if isinstance(resp, (bytes, bytearray)):
+        try:
+            import orjson
+            return orjson.loads(resp)
+        except Exception:
+            pass
+        return json.loads(resp.decode("utf-8", errors="replace"))
+    if isinstance(resp, str):
+        return json.loads(resp)
+    return resp
 
 from app.config import settings
 from app.models.source import Source
@@ -74,10 +99,12 @@ async def fetch_xtream(source: Source) -> IngestResult:
     headers = {
         "User-Agent": ua,
         "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
     }
 
     # Timeouts: user-configurable via SOURCE_TIMEOUT
-    src_timeout = getattr(settings, "SOURCE_TIMEOUT", 60.0) or 60.0
+    from app.services.ingestion.manager import get_source_timeout
+    src_timeout = get_source_timeout()
     timeout = httpx.Timeout(connect=min(15.0, src_timeout), read=src_timeout, write=15.0, pool=15.0)
 
     try:
@@ -105,7 +132,7 @@ async def fetch_xtream(source: Source) -> IngestResult:
                 return result
 
             try:
-                auth_data = resp.json()
+                auth_data = parse_fast_json(resp)
             except Exception as e:
                 result.status = "error"
                 result.error_reason = "parse_error"
@@ -137,7 +164,7 @@ async def fetch_xtream(source: Source) -> IngestResult:
                     )
                     category_map: Dict[str, str] = {}
                     if cat_resp.status_code == 200:
-                        categories = cat_resp.json()
+                        categories = parse_fast_json(cat_resp)
                         if isinstance(categories, list):
                             for cat in categories:
                                 cid = str(cat.get("category_id"))
@@ -147,9 +174,11 @@ async def fetch_xtream(source: Source) -> IngestResult:
                         f"{base_url}/player_api.php?username={username}&password={password}&action=get_live_streams"
                     )
                     if streams_resp.status_code == 200:
-                        streams = streams_resp.json()
+                        streams = parse_fast_json(streams_resp)
                         if isinstance(streams, list):
-                            for item in streams:
+                            for idx, item in enumerate(streams):
+                                if idx > 0 and idx % 1000 == 0:
+                                    await asyncio.sleep(0)
                                 stream_id = str(item.get("stream_id", ""))
                                 cat_id = str(item.get("category_id", ""))
                                 group_name = category_map.get(cat_id, "Uncategorized")
@@ -178,7 +207,7 @@ async def fetch_xtream(source: Source) -> IngestResult:
                     )
                     category_map = {}
                     if cat_resp.status_code == 200:
-                        categories = cat_resp.json()
+                        categories = parse_fast_json(cat_resp)
                         if isinstance(categories, list):
                             for cat in categories:
                                 cid = str(cat.get("category_id"))
@@ -188,9 +217,11 @@ async def fetch_xtream(source: Source) -> IngestResult:
                         f"{base_url}/player_api.php?username={username}&password={password}&action=get_vod_streams"
                     )
                     if streams_resp.status_code == 200:
-                        streams = streams_resp.json()
+                        streams = parse_fast_json(streams_resp)
                         if isinstance(streams, list):
-                            for item in streams:
+                            for idx, item in enumerate(streams):
+                                if idx > 0 and idx % 1000 == 0:
+                                    await asyncio.sleep(0)
                                 stream_id = str(item.get("stream_id", ""))
                                 cat_id = str(item.get("category_id", ""))
                                 group_name = category_map.get(cat_id, "Uncategorized")
@@ -228,7 +259,7 @@ async def fetch_xtream(source: Source) -> IngestResult:
                     )
                     category_map = {}
                     if cat_resp.status_code == 200:
-                        categories = cat_resp.json()
+                        categories = parse_fast_json(cat_resp)
                         if isinstance(categories, list):
                             for cat in categories:
                                 cid = str(cat.get("category_id"))
@@ -238,9 +269,11 @@ async def fetch_xtream(source: Source) -> IngestResult:
                         f"{base_url}/player_api.php?username={username}&password={password}&action=get_series"
                     )
                     if series_resp.status_code == 200:
-                        series_list = series_resp.json()
+                        series_list = parse_fast_json(series_resp)
                         if isinstance(series_list, list):
-                            for item in series_list:
+                            for idx, item in enumerate(series_list):
+                                if idx > 0 and idx % 1000 == 0:
+                                    await asyncio.sleep(0)
                                 series_id = str(item.get("series_id", ""))
                                 cat_id = str(item.get("category_id", ""))
                                 group_name = category_map.get(cat_id, "Uncategorized")

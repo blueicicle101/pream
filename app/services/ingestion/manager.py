@@ -57,6 +57,18 @@ def get_source_scan_threads(db: Optional[Session] = None) -> int:
     return max(1, min(2, getattr(settings, "SOURCE_SCAN_THREADS", 1)))
 
 
+def get_source_timeout(db: Optional[Session] = None) -> float:
+    """Get active source request timeout in seconds (default: 60.0s)."""
+    if db:
+        db_setting = db.query(Setting).filter(Setting.key == "source_timeout").first()
+        if db_setting and db_setting.value:
+            try:
+                return max(5.0, float(db_setting.value))
+            except ValueError:
+                pass
+    return getattr(settings, "SOURCE_TIMEOUT", 60.0)
+
+
 def get_scan_executor() -> concurrent.futures.ThreadPoolExecutor:
     """Get or create bounded ThreadPoolExecutor for background source scanning."""
     global _scan_executor
@@ -276,7 +288,9 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
 
         # Prepare Channels with rules applied immediately
         channels_to_insert = []
-        for ch in result.channels:
+        for idx, ch in enumerate(result.channels):
+            if idx > 0 and idx % 1000 == 0:
+                await asyncio.sleep(0)
             raw_grp = ch.get("raw_group") or "Uncategorized"
             raw_nm = ch.get("raw_name") or "Unnamed Channel"
             disp_nm, disp_grp, is_hid = apply_rules_to_item_chain(
@@ -299,7 +313,9 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
 
         # Prepare Movies with rules applied immediately
         movies_to_insert = []
-        for mv in result.movies:
+        for idx, mv in enumerate(result.movies):
+            if idx > 0 and idx % 1000 == 0:
+                await asyncio.sleep(0)
             raw_grp = mv.get("raw_group") or "Uncategorized"
             raw_nm = mv.get("raw_name") or "Unnamed Movie"
             disp_nm, disp_grp, is_hid = apply_rules_to_item_chain(
@@ -323,7 +339,9 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
 
         # Prepare Series with rules applied immediately
         series_to_insert = []
-        for s in result.series:
+        for idx, s in enumerate(result.series):
+            if idx > 0 and idx % 1000 == 0:
+                await asyncio.sleep(0)
             raw_grp = s.get("raw_group") or "Uncategorized"
             raw_nm = s.get("raw_name") or "Unnamed Series"
             disp_nm, disp_grp, is_hid = apply_rules_to_item_chain(
@@ -379,14 +397,17 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
             for i in range(0, len(channels_to_insert), CHUNK_SIZE):
                 db.bulk_save_objects(channels_to_insert[i : i + CHUNK_SIZE])
                 db.commit()
+                await asyncio.sleep(0)
 
             for i in range(0, len(movies_to_insert), CHUNK_SIZE):
                 db.bulk_save_objects(movies_to_insert[i : i + CHUNK_SIZE])
                 db.commit()
+                await asyncio.sleep(0)
 
             for i in range(0, len(series_to_insert), CHUNK_SIZE):
                 db.bulk_save_objects(series_to_insert[i : i + CHUNK_SIZE])
                 db.commit()
+                await asyncio.sleep(0)
 
             source.expiry_date = result.expiry_date
             source.max_connections = result.max_connections
