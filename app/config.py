@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     OPT_LIBRARY_CATEGORY_COUNTS: bool = False  # Exact item counts in library category sidebar
     OPT_TASK_POLL_INTERVAL_MS: int = 1500  # Interval (ms) for footer status polling (1500, 3000, 5000, 10000, 0=off)
     OPT_RUN_STARTUP_TASKS: bool = False  # Automatically execute source refresh upon application startup
+    OPT_PRESERVE_TMDB_ON_REFRESH: bool = True  # Preserve TMDB metadata & category sorting across source refreshes
 
     # ── Scheduler ──
     REFRESH_CRON_ENABLED: bool = True  # Master switch for automated cron schedule

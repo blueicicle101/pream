@@ -378,7 +378,95 @@ async function submitAddSource(e, selectCategoriesAfter = false) {
     }
 }
 
-// ── Test Source Connection ──
+// ── Quick Paste & URL Auto-Fill ──
+function autoFillFromPastedString(rawStr) {
+    if (!rawStr || typeof rawStr !== 'string') return;
+    const str = rawStr.trim();
+    if (!str) return;
+
+    let serverUrl = '';
+    let username = '';
+    let password = '';
+    let sourceType = 'xtream';
+
+    try {
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+            const urlObj = new URL(str);
+            const searchParams = urlObj.searchParams;
+
+            // Check if query string contains username / password (e.g. get.php or player_api.php)
+            if (searchParams.has('username')) {
+                username = searchParams.get('username') || '';
+            }
+            if (searchParams.has('password')) {
+                password = searchParams.get('password') || '';
+            }
+
+            // Check embedded basic auth like http://user:pass@host:port
+            if (urlObj.username) username = decodeURIComponent(urlObj.username);
+            if (urlObj.password) password = decodeURIComponent(urlObj.password);
+
+            if (username && password) {
+                // If it has username and password parameters, this is an Xtream provider
+                serverUrl = `${urlObj.protocol}//${urlObj.host}`;
+                sourceType = 'xtream';
+            } else if (urlObj.pathname.endsWith('.m3u') || urlObj.pathname.endsWith('.m3u8') || str.includes('m3u_plus')) {
+                // M3U Playlist
+                serverUrl = str;
+                sourceType = 'm3u';
+            } else {
+                serverUrl = `${urlObj.protocol}//${urlObj.host}`;
+            }
+        } else if (str.includes('|') || str.includes(';') || str.includes(',')) {
+            // Delimited credentials format: "http://host:8080 | user | pass"
+            const parts = str.split(/[|;,]/).map(p => p.trim());
+            if (parts.length >= 3) {
+                serverUrl = parts[0];
+                username = parts[1];
+                password = parts[2];
+                sourceType = 'xtream';
+            }
+        }
+    } catch (e) {
+        // Fallback simple regex parsing
+        const uMatch = str.match(/[?&]username=([^&]+)/i);
+        const pMatch = str.match(/[?&]password=([^&]+)/i);
+        if (uMatch) username = decodeURIComponent(uMatch[1]);
+        if (pMatch) password = decodeURIComponent(pMatch[1]);
+
+        const hostMatch = str.match(/^(https?:\/\/[^\/?#]+)/i);
+        if (hostMatch) serverUrl = hostMatch[1];
+    }
+
+    if (serverUrl) {
+        const urlInput = document.getElementById('sourceUrl');
+        if (urlInput) urlInput.value = serverUrl;
+    }
+    if (sourceType) {
+        const typeSelect = document.getElementById('sourceType');
+        if (typeSelect) {
+            typeSelect.value = sourceType;
+            toggleSourceFields();
+        }
+    }
+    if (username) {
+        const uInput = document.getElementById('sourceUsername');
+        if (uInput) uInput.value = username;
+    }
+    if (password) {
+        const pInput = document.getElementById('sourcePassword');
+        if (pInput) pInput.value = password;
+    }
+
+    if (serverUrl || username) {
+        showToast('Extracted server URL and credentials!');
+    }
+}
+
+function extractURLParams(inputEl) {
+    if (!inputEl || !inputEl.value) return;
+    autoFillFromPastedString(inputEl.value);
+}
 async function testSourceConnection(modalType) {
     const isEdit = (modalType === 'edit');
     const btn = document.getElementById(isEdit ? 'btnTestEditSource' : 'btnTestAddSource');
@@ -2432,6 +2520,178 @@ async function triggerPurgeLogs() {
         loadStreamLogs(currentLogsFilter);
     } catch (err) {
         showToast('Failed to purge stream logs: ' + err.message, true);
+    }
+}
+
+// ── Drop Hidden Category Rows & Vacuum Database Upkeep ──
+async function purgeHiddenItems(btn) {
+    if (!confirm('Are you sure you want to permanently drop all hidden items from the database?\n\nThis will purge all rows currently marked as hidden and vacuum SQLite to free disk space. A source refresh will be needed to restore them if desired.')) {
+        return;
+    }
+
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Purging...';
+    }
+
+    try {
+        const resp = await fetch('/api/rules/purge-hidden', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok && data.status === 'ok') {
+            showToast(data.message || 'Hidden items dropped successfully.');
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            showToast(data.detail || data.message || 'Failed to purge hidden items', true);
+        }
+    } catch (err) {
+        showToast('Error purging hidden items: ' + err.message, true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+}
+
+// ── AI Rules Assistant ──
+let suggestedAiRules = [];
+
+async function generateAiRules(btn) {
+    const input = document.getElementById('aiRuleInstruction');
+    const instruction = input ? input.value.trim() : '';
+    if (!instruction) {
+        showToast('Please enter an instruction for Gemini AI.', true);
+        return;
+    }
+
+    const loadingEl = document.getElementById('aiRulesLoading');
+    const containerEl = document.getElementById('aiRulesResultsContainer');
+    const addBtn = document.getElementById('btnAddAiRules');
+    const tbody = document.getElementById('aiRulesTableBody');
+
+    if (btn) btn.disabled = true;
+    if (loadingEl) loadingEl.classList.remove('d-none');
+    if (containerEl) containerEl.classList.add('d-none');
+    if (addBtn) addBtn.classList.add('d-none');
+
+    try {
+        const resp = await fetch('/api/rules/ai-suggest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_instruction: instruction }),
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.detail || data.message || 'AI rule generation failed');
+        }
+
+        suggestedAiRules = data.rules || [];
+        if (suggestedAiRules.length === 0) {
+            showToast('Gemini analyzed categories but did not produce matching rules. Try refining your prompt.');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted">No rules suggested.</td></tr>';
+            if (containerEl) containerEl.classList.remove('d-none');
+            return;
+        }
+
+        renderAiSuggestedRulesTable(suggestedAiRules);
+        if (containerEl) containerEl.classList.remove('d-none');
+        if (addBtn) addBtn.classList.remove('d-none');
+        showToast(`Gemini suggested ${suggestedAiRules.length} rule(s)!`);
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        if (btn) btn.disabled = false;
+        if (loadingEl) loadingEl.classList.add('d-none');
+    }
+}
+
+function renderAiSuggestedRulesTable(rules) {
+    const tbody = document.getElementById('aiRulesTableBody');
+    if (!tbody) return;
+
+    let html = '';
+    rules.forEach((r, idx) => {
+        const ruleBadge = r.rule_type === 'hide_group' 
+            ? '<span class="badge bg-danger-subtle text-danger border">Hide Group</span>'
+            : (r.rule_type === 'rename_group' ? '<span class="badge bg-primary-subtle text-primary border">Rename Group</span>'
+            : `<span class="badge bg-info-subtle text-info border">${escapeHtml(r.rule_type)}</span>`);
+
+        const scopeBadge = `<span class="badge bg-light text-dark border">${escapeHtml(r.content_type || 'all')}</span>`;
+
+        html += `
+        <tr>
+            <td class="text-center">
+                <input class="form-check-input ai-rule-check" type="checkbox" data-idx="${idx}" checked>
+            </td>
+            <td>${ruleBadge}</td>
+            <td>${scopeBadge}</td>
+            <td><code class="text-primary font-monospace fs-8">${escapeHtml(r.match_pattern)}</code></td>
+            <td>${r.replacement ? `<code class="text-success font-monospace fs-8">${escapeHtml(r.replacement)}</code>` : '<span class="text-muted fs-8">—</span>'}</td>
+            <td><small class="text-secondary">${escapeHtml(r.description || 'AI Suggested Rule')}</small></td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+}
+
+function toggleSelectAllAiRules(checked) {
+    const checkboxes = document.querySelectorAll('.ai-rule-check');
+    checkboxes.forEach(cb => { cb.checked = checked; });
+    const master = document.getElementById('aiSelectAllCheck');
+    if (master) master.checked = checked;
+}
+
+async function addSelectedAiRules(btn) {
+    const selectedCheckboxes = document.querySelectorAll('.ai-rule-check:checked');
+    if (selectedCheckboxes.length === 0) {
+        showToast('Please select at least one rule to add.', true);
+        return;
+    }
+
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Adding Rules...';
+    }
+
+    let addedCount = 0;
+    try {
+        for (const cb of selectedCheckboxes) {
+            const idx = parseInt(cb.dataset.idx, 10);
+            const r = suggestedAiRules[idx];
+            if (!r) continue;
+
+            const payload = {
+                order: 0,
+                rule_type: r.rule_type,
+                content_type: r.content_type || 'all',
+                match_field: 'group',
+                match_pattern: r.match_pattern,
+                replacement: r.replacement || '',
+                new_group: '',
+                description: r.description || 'AI Generated Rule',
+                enabled: true
+            };
+
+            const resp = await fetch('/api/rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (resp.ok) addedCount++;
+        }
+
+        showToast(`Successfully added ${addedCount} rule(s) to the pipeline!`);
+        setTimeout(() => location.reload(), 900);
+    } catch (err) {
+        showToast('Error adding AI rules: ' + err.message, true);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 }
 

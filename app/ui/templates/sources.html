@@ -176,6 +176,22 @@
             </div>
             <form id="addSourceForm" onsubmit="submitAddSource(event)">
                 <div class="modal-body">
+                    <!-- Quick Paste & Auto-Fill Field -->
+                    <div class="p-2 mb-3 bg-light rounded border">
+                        <label class="form-label fw-semibold text-primary fs-7 mb-1">
+                            <i class="fa-solid fa-wand-magic-sparkles me-1"></i> Quick Paste & Auto-Fill
+                        </label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control font-monospace" id="quickPasteInput"
+                                placeholder="Paste Xtream M3U URL or full login link here..."
+                                oninput="autoFillFromPastedString(this.value)">
+                            <button class="btn btn-outline-primary" type="button" onclick="autoFillFromPastedString(document.getElementById('quickPasteInput').value)">
+                                <i class="fa-solid fa-bolt me-1"></i> Parse
+                            </button>
+                        </div>
+                        <div class="form-text fs-8 text-muted mt-1">Automatically detects Server URL, Username, Password, and Source Type from pasted URLs.</div>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Source Name</label>
                         <input type="text" class="form-control" id="sourceName" required placeholder="e.g. IPTV">
@@ -192,7 +208,8 @@
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Provider URL</label>
                         <input type="text" class="form-control" id="sourceUrl" required
-                            placeholder="http://provider.example.com:8080">
+                            placeholder="http://provider.example.com:8080"
+                            onchange="extractURLParams(this)">
                         <div class="form-text text-muted">For Xtream, enter the server base URL. For M3U, enter the
                             playlist URL.</div>
                     </div>

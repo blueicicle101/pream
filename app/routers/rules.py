@@ -131,6 +131,55 @@ def trigger_cancel_rules():
     return {"status": "ok", "message": "Rule application cancellation requested"}
 
 
+@router.post("/purge-hidden")
+def purge_hidden_items(db: Session = Depends(get_db)):
+    """
+    On-demand database upkeep: Permanently drops all rows currently marked as hidden
+    from channels, movies, and series tables, and vacuums SQLite to reclaim disk space.
+    """
+    from app.models.channel import Channel
+    from app.models.movie import Movie
+    from app.models.series import Episode, Series
+    from app.models.setting import Setting
+    from sqlalchemy import text
+
+    c_deleted = db.query(Channel).filter(Channel.is_hidden == True).delete(synchronize_session=False)
+    m_deleted = db.query(Movie).filter(Movie.is_hidden == True).delete(synchronize_session=False)
+    s_deleted = db.query(Series).filter(Series.is_hidden == True).delete(synchronize_session=False)
+    
+    # Also clean orphaned episodes if any series was deleted
+    e_deleted = db.execute(
+        text("DELETE FROM episodes WHERE series_id NOT IN (SELECT id FROM series)")
+    ).rowcount
+
+    # Set banner flag in database settings
+    s_flag = db.query(Setting).filter(Setting.key == "hidden_items_purged").first()
+    if not s_flag:
+        s_flag = Setting(key="hidden_items_purged", value="true")
+        db.add(s_flag)
+    else:
+        s_flag.value = "true"
+
+    db.commit()
+
+    # Reclaim SQLite storage space
+    try:
+        db.execute(text("VACUUM"))
+        db.commit()
+    except Exception as e:
+        pass
+
+    total_purged = c_deleted + m_deleted + s_deleted + e_deleted
+    return {
+        "status": "ok",
+        "message": f"Purged {total_purged:,} hidden items from database ({c_deleted:,} Live, {m_deleted:,} Movies, {s_deleted:,} Series).",
+        "channels_purged": c_deleted,
+        "movies_purged": m_deleted,
+        "series_purged": s_deleted,
+        "episodes_purged": e_deleted,
+    }
+
+
 class QuickGroupActionRequest(BaseModel):
     group_name: str
     content_type: str = "all"  # "all", "live", "vod", "series"
@@ -140,6 +189,67 @@ class QuickGroupActionRequest(BaseModel):
 from app.models.channel import Channel
 from app.models.movie import Movie
 from app.models.series import Series
+from app.services.gemini import suggest_group_rules_with_gemini
+from app.services.ingestion.manager import is_group_by_source_enabled
+
+
+class AISuggestRulesRequest(BaseModel):
+    user_instruction: str
+
+
+@router.post("/ai-suggest")
+async def ai_suggest_rules(req: AISuggestRulesRequest, db: Session = Depends(get_db)):
+    """
+    Generate candidate category transformation rules using Gemini AI based on user instructions.
+    Groups are extracted from Live channels, VOD movies, and TV series in the database.
+    """
+    user_instr = req.user_instruction.strip()
+    if not user_instr:
+        raise HTTPException(status_code=400, detail="User instruction cannot be empty")
+
+    gbs = is_group_by_source_enabled(db)
+
+    # Extract clean raw/display groups from database
+    live_groups_raw = [g[0] for g in db.query(Channel.display_group).distinct().all() if g[0]]
+    vod_groups_raw = [g[0] for g in db.query(Movie.display_group).distinct().all() if g[0]]
+    series_groups_raw = [g[0] for g in db.query(Series.display_group).distinct().all() if g[0]]
+
+    # If GROUP_BY_SOURCE is active, strip the "[Source] " prefix so AI sees pure category names
+    def clean_prefix(groups: List[str]) -> List[str]:
+        cleaned = set()
+        prefix_pattern = re.compile(r"^\[.*?\]\s*")
+        for g in groups:
+            if gbs:
+                cleaned.add(prefix_pattern.sub("", g).strip())
+            else:
+                cleaned.add(g.strip())
+        return sorted([c for c in cleaned if c])
+
+    categories = {
+        "live": clean_prefix(live_groups_raw),
+        "vod": clean_prefix(vod_groups_raw),
+        "series": clean_prefix(series_groups_raw),
+    }
+
+    try:
+        rules = await suggest_group_rules_with_gemini(
+            user_instruction=user_instr,
+            categories=categories,
+            group_by_source=gbs,
+            db=db,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "status": "ok",
+        "rules": rules,
+        "sample_categories": {
+            "live_count": len(categories["live"]),
+            "vod_count": len(categories["vod"]),
+            "series_count": len(categories["series"]),
+        },
+    }
 
 
 @router.post("/quick-rename-group")

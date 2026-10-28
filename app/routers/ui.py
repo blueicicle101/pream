@@ -444,9 +444,13 @@ from app.services.rules_engine import get_rules_diff_preview
 def page_rules(request: Request, db: Session = Depends(get_db), admin: str = Depends(require_admin)):
     """Render rules engine management page with initial 2-column live diff preview."""
     db_locked = False
+    hidden_purged = False
     try:
         rules = db.query(Rule).order_by(Rule.order.asc(), Rule.id.asc()).all()
         diff_items = get_rules_diff_preview(db, scope="channels", limit=100)
+        s_purged = db.query(Setting).filter(Setting.key == "hidden_items_purged").first()
+        if s_purged and s_purged.value == "true":
+            hidden_purged = True
     except Exception as e:
         logger.warning(f"Database busy or locked when accessing rules: {e}")
         rules = []
@@ -461,6 +465,7 @@ def page_rules(request: Request, db: Session = Depends(get_db), admin: str = Dep
             "rules": rules,
             "diff_items": diff_items,
             "db_locked": db_locked,
+            "hidden_purged": hidden_purged,
             "server_name": settings.SERVER_NAME,
         },
     )
@@ -522,6 +527,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
     opt_library_category_counts = get_runtime_bool_setting(db, "opt_library_category_counts", settings.OPT_LIBRARY_CATEGORY_COUNTS)
     opt_task_poll_interval_ms = get_runtime_int_setting(db, "opt_task_poll_interval_ms", settings.OPT_TASK_POLL_INTERVAL_MS)
     opt_run_startup_tasks = get_runtime_bool_setting(db, "opt_run_startup_tasks", settings.OPT_RUN_STARTUP_TASKS)
+    opt_preserve_tmdb_on_refresh = get_runtime_bool_setting(db, "opt_preserve_tmdb_on_refresh", settings.OPT_PRESERVE_TMDB_ON_REFRESH)
 
     return templates.TemplateResponse(
         request=request,
@@ -557,6 +563,7 @@ def page_settings(request: Request, db: Session = Depends(get_db), admin: str = 
             "opt_library_category_counts": opt_library_category_counts,
             "opt_task_poll_interval_ms": opt_task_poll_interval_ms,
             "opt_run_startup_tasks": opt_run_startup_tasks,
+            "opt_preserve_tmdb_on_refresh": opt_preserve_tmdb_on_refresh,
             "output_username": settings.OUTPUT_USERNAME,
             "output_password": settings.OUTPUT_PASSWORD,
             "server_name": settings.SERVER_NAME,
@@ -598,6 +605,7 @@ def update_settings(
     opt_library_category_counts: Optional[str] = Form(None),
     opt_task_poll_interval_ms: Optional[str] = Form("1500"),
     opt_run_startup_tasks: Optional[str] = Form(None),
+    opt_preserve_tmdb_on_refresh: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ):
@@ -619,6 +627,7 @@ def update_settings(
     opt_lsb_val = "true" if opt_library_source_badges else "false"
     opt_lcc_val = "true" if opt_library_category_counts else "false"
     opt_rst_val = "true" if opt_run_startup_tasks else "false"
+    opt_ptm_val = "true" if opt_preserve_tmdb_on_refresh else "false"
     try:
         opt_poll_val = str(max(0, int(opt_task_poll_interval_ms or 1500)))
     except ValueError:
@@ -678,6 +687,7 @@ def update_settings(
         ("opt_library_category_counts", opt_lcc_val),
         ("opt_task_poll_interval_ms", opt_poll_val),
         ("opt_run_startup_tasks", opt_rst_val),
+        ("opt_preserve_tmdb_on_refresh", opt_ptm_val),
     ]
 
     for key, val in pairs:

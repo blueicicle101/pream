@@ -127,9 +127,9 @@ async def run_stream_health_check(
     # Sequential per-source testing to respect single-connection limits of upstream providers
     for src in sources:
         ua = get_user_agent(src.user_agent)
-        candidates: List[Dict[str, Any]] = []
-
+        
         # 1. Collect candidate Live channels
+        channel_candidates: List[Dict[str, Any]] = []
         channels = (
             db.query(Channel.display_name, Channel.stream_url)
             .filter(Channel.source_id == src.id, Channel.is_hidden == False, Channel.stream_url.isnot(None))
@@ -137,9 +137,10 @@ async def run_stream_health_check(
             .all()
         )
         for ch in channels:
-            candidates.append({"type": "live", "name": ch.display_name, "url": ch.stream_url})
+            channel_candidates.append({"type": "live", "name": ch.display_name, "url": ch.stream_url})
 
         # 2. Collect candidate Movies
+        movie_candidates: List[Dict[str, Any]] = []
         movies = (
             db.query(Movie.display_name, Movie.stream_url)
             .filter(Movie.source_id == src.id, Movie.is_hidden == False, Movie.stream_url.isnot(None))
@@ -147,9 +148,10 @@ async def run_stream_health_check(
             .all()
         )
         for mv in movies:
-            candidates.append({"type": "movie", "name": mv.display_name, "url": mv.stream_url})
+            movie_candidates.append({"type": "movie", "name": mv.display_name, "url": mv.stream_url})
 
         # 3. Collect candidate Series Episodes
+        series_candidates: List[Dict[str, Any]] = []
         episodes = (
             db.query(Episode.title, Episode.stream_url)
             .filter(Episode.source_id == src.id, Episode.stream_url.isnot(None))
@@ -157,9 +159,18 @@ async def run_stream_health_check(
             .all()
         )
         for ep in episodes:
-            candidates.append({"type": "series", "name": ep.title or "Episode", "url": ep.stream_url})
+            series_candidates.append({"type": "series", "name": ep.title or "Episode", "url": ep.stream_url})
 
-        if not candidates:
+        # Sample X items per available category
+        sampled: List[Dict[str, Any]] = []
+        if channel_candidates:
+            sampled.extend(random.sample(channel_candidates, min(len(channel_candidates), sample_count)))
+        if movie_candidates:
+            sampled.extend(random.sample(movie_candidates, min(len(movie_candidates), sample_count)))
+        if series_candidates:
+            sampled.extend(random.sample(series_candidates, min(len(series_candidates), sample_count)))
+
+        if not sampled:
             source_results.append({
                 "source_id": src.id,
                 "source_name": src.name,
@@ -176,8 +187,6 @@ async def run_stream_health_check(
             })
             continue
 
-        # Mixed random sample up to sample_count
-        sampled = random.sample(candidates, min(len(candidates), sample_count))
         test_details = []
         passed = 0
         latencies = []

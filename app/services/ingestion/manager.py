@@ -289,6 +289,85 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
         active_rules = db.query(Rule).filter(Rule.enabled == True).order_by(Rule.order.asc()).all()
         compiled_rules = compile_rules(active_rules)
 
+        # Check if TMDB metadata preservation on refresh is enabled
+        s_pres = db.query(Setting).filter(Setting.key == "opt_preserve_tmdb_on_refresh").first()
+        preserve_tmdb = (s_pres.value.lower() == "true") if s_pres and s_pres.value else settings.OPT_PRESERVE_TMDB_ON_REFRESH
+
+        existing_movie_meta: Dict[Any, Dict[str, Any]] = {}
+        existing_series_meta: Dict[Any, Dict[str, Any]] = {}
+
+        if preserve_tmdb:
+            # Query existing TMDB-enriched records for this source before deleting
+            enriched_movies = (
+                db.query(
+                    Movie.source_stream_id,
+                    Movie.raw_name,
+                    Movie.tmdb_id,
+                    Movie.tmdb_fetched_at,
+                    Movie.poster_url,
+                    Movie.backdrop_url,
+                    Movie.plot,
+                    Movie.rating,
+                    Movie.genre,
+                    Movie.year,
+                    Movie.display_name,
+                    Movie.display_group,
+                )
+                .filter(Movie.source_id == source.id, Movie.tmdb_id.isnot(None))
+                .all()
+            )
+            for m in enriched_movies:
+                meta = {
+                    "tmdb_id": m.tmdb_id,
+                    "tmdb_fetched_at": m.tmdb_fetched_at,
+                    "poster_url": m.poster_url,
+                    "backdrop_url": m.backdrop_url,
+                    "plot": m.plot,
+                    "rating": m.rating,
+                    "genre": m.genre,
+                    "year": m.year,
+                    "display_name": m.display_name,
+                    "display_group": m.display_group,
+                }
+                if m.source_stream_id:
+                    existing_movie_meta[m.source_stream_id] = meta
+                if m.raw_name:
+                    existing_movie_meta[m.raw_name] = meta
+
+            enriched_series = (
+                db.query(
+                    Series.source_series_id,
+                    Series.raw_name,
+                    Series.tmdb_id,
+                    Series.tmdb_fetched_at,
+                    Series.poster_url,
+                    Series.plot,
+                    Series.rating,
+                    Series.genre,
+                    Series.year,
+                    Series.display_name,
+                    Series.display_group,
+                )
+                .filter(Series.source_id == source.id, Series.tmdb_id.isnot(None))
+                .all()
+            )
+            for s in enriched_series:
+                meta = {
+                    "tmdb_id": s.tmdb_id,
+                    "tmdb_fetched_at": s.tmdb_fetched_at,
+                    "poster_url": s.poster_url,
+                    "plot": s.plot,
+                    "rating": s.rating,
+                    "genre": s.genre,
+                    "year": s.year,
+                    "display_name": s.display_name,
+                    "display_group": s.display_group,
+                }
+                if s.source_series_id:
+                    existing_series_meta[s.source_series_id] = meta
+                if s.raw_name:
+                    existing_series_meta[s.raw_name] = meta
+
         # Prepare Channels with rules applied immediately
         channels_to_insert = []
         for idx, ch in enumerate(result.channels):
@@ -314,20 +393,45 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
                 )
             )
 
-        # Prepare Movies with rules applied immediately
+        # Prepare Movies with rules applied immediately (and TMDB metadata carryover if enabled)
         movies_to_insert = []
         for idx, mv in enumerate(result.movies):
             if idx > 0 and idx % 1000 == 0:
                 await asyncio.sleep(0)
             raw_grp = mv.get("raw_group") or "Uncategorized"
             raw_nm = mv.get("raw_name") or "Unnamed Movie"
+            src_stream_id = mv.get("source_stream_id")
+
             disp_nm, disp_grp, is_hid = apply_rules_to_item_chain(
                 "vod", raw_nm, raw_grp, source.name, group_prefix, compiled_rules
             )
-            movies_to_insert.append(
-                Movie(
+
+            # Check if previous TMDB metadata exists for this stream
+            prev_meta = existing_movie_meta.get(src_stream_id) or existing_movie_meta.get(raw_nm)
+            if prev_meta:
+                m_obj = Movie(
                     source_id=source.id,
-                    source_stream_id=mv.get("source_stream_id"),
+                    source_stream_id=src_stream_id,
+                    raw_name=raw_nm,
+                    raw_group=raw_grp,
+                    display_name=prev_meta["display_name"] or disp_nm,
+                    display_group=prev_meta["display_group"] or disp_grp,
+                    poster_url=prev_meta["poster_url"] or mv.get("poster_url"),
+                    backdrop_url=prev_meta["backdrop_url"],
+                    plot=prev_meta["plot"],
+                    rating=prev_meta["rating"] or mv.get("rating"),
+                    genre=prev_meta["genre"],
+                    year=prev_meta["year"],
+                    tmdb_id=prev_meta["tmdb_id"],
+                    tmdb_fetched_at=prev_meta["tmdb_fetched_at"],
+                    container_ext=mv.get("container_ext") or "mp4",
+                    stream_url=mv.get("stream_url"),
+                    is_hidden=is_hid,
+                )
+            else:
+                m_obj = Movie(
+                    source_id=source.id,
+                    source_stream_id=src_stream_id,
                     raw_name=raw_nm,
                     raw_group=raw_grp,
                     display_name=disp_nm,
@@ -338,22 +442,43 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
                     stream_url=mv.get("stream_url"),
                     is_hidden=is_hid,
                 )
-            )
+            movies_to_insert.append(m_obj)
 
-        # Prepare Series with rules applied immediately
+        # Prepare Series with rules applied immediately (and TMDB metadata carryover if enabled)
         series_to_insert = []
         for idx, s in enumerate(result.series):
             if idx > 0 and idx % 1000 == 0:
                 await asyncio.sleep(0)
             raw_grp = s.get("raw_group") or "Uncategorized"
             raw_nm = s.get("raw_name") or "Unnamed Series"
+            src_series_id = s.get("source_series_id")
+
             disp_nm, disp_grp, is_hid = apply_rules_to_item_chain(
                 "series", raw_nm, raw_grp, source.name, group_prefix, compiled_rules
             )
-            series_to_insert.append(
-                Series(
+
+            prev_meta = existing_series_meta.get(src_series_id) or existing_series_meta.get(raw_nm)
+            if prev_meta:
+                s_obj = Series(
                     source_id=source.id,
-                    source_series_id=s.get("source_series_id"),
+                    source_series_id=src_series_id,
+                    raw_name=raw_nm,
+                    raw_group=raw_grp,
+                    display_name=prev_meta["display_name"] or disp_nm,
+                    display_group=prev_meta["display_group"] or disp_grp,
+                    poster_url=prev_meta["poster_url"] or s.get("poster_url"),
+                    plot=prev_meta["plot"] or s.get("plot"),
+                    genre=prev_meta["genre"] or s.get("genre"),
+                    year=prev_meta["year"] or s.get("year"),
+                    rating=prev_meta["rating"] or s.get("rating"),
+                    tmdb_id=prev_meta["tmdb_id"],
+                    tmdb_fetched_at=prev_meta["tmdb_fetched_at"],
+                    is_hidden=is_hid,
+                )
+            else:
+                s_obj = Series(
+                    source_id=source.id,
+                    source_series_id=src_series_id,
                     raw_name=raw_nm,
                     raw_group=raw_grp,
                     display_name=disp_nm,
@@ -365,7 +490,7 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
                     rating=s.get("rating"),
                     is_hidden=is_hid,
                 )
-            )
+            series_to_insert.append(s_obj)
 
         update_worker_progress(
             str(source_id),
@@ -417,6 +542,12 @@ async def refresh_source(source_id: int, db: Optional[Session] = None) -> Dict[s
             source.last_status = "ok"
             source.last_error = None
             source.last_refresh = now
+
+            # Clear hidden items purged banner flag upon source refresh
+            s_purged = db.query(Setting).filter(Setting.key == "hidden_items_purged").first()
+            if s_purged:
+                s_purged.value = "false"
+
             db.commit()
 
         update_worker_progress(str(source_id), source.name, "Complete", 100)
